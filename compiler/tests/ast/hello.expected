@@ -1,0 +1,69 @@
+Struct Entity
+  vec3 pos
+  vec3 vel
+  int hp
+Func vec3 update(Entity* e, float dt)
+  Block
+    Assign +=
+      target:
+        Field .pos
+          Name e
+      value:
+        Binary *
+          Field .vel
+            Name e
+          Name dt
+    Return
+      Field .pos
+        Name e
+Main
+  Var var world
+    =
+      Call
+        callee:
+          Name arena
+  Var var e
+    =
+      Call
+        callee:
+          Field .new
+            Name world
+        args:
+          Name Entity
+  Assign =
+    target:
+      Field .hp
+        Name e
+    value:
+      Int 100
+  Assign =
+    target:
+      Field .vel
+        Name e
+    value:
+      Call
+        callee:
+          Name vec3
+        args:
+          Int 1
+          Int 0
+          Int 0
+  ForIn i
+    iter:
+      Binary ..
+        Int 0
+        Int 60
+    Block
+      ExprStmt
+        Call
+          callee:
+            Name update
+          args:
+            Name e
+            Float 0.016
+  ExprStmt
+    Call
+      callee:
+        Name print
+      args:
+        String "hello, strata"

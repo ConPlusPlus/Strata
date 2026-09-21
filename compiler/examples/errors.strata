@@ -1,0 +1,7 @@
+int add(int a, int b) {
+    return a + b
+}
+
+var x = add(1)
+var y = 3 + true
+print(unknown_name)

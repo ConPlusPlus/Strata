@@ -1,0 +1,34 @@
+# --- build artifacts -------------------------------------------------------
+# The compiler is written in D--; `dec` emits a <stem>.c next to each .dmm it builds,
+# then a native exe. `stratac run/build` emit <stem>.c/.exe next to the .strata source.
+# None of that is source — only the .dmm/.hmm/.strata files are.
+
+# dec-generated C from building the compiler modules
+compiler/src/*.c
+compiler/src/*.exe
+
+# stratac output beside example programs
+compiler/examples/*.c
+compiler/examples/*.exe
+
+# build output directory (stratac.exe, console.exe, libstrata.dll, libstrata.c)
+compiler/bin/
+
+# generic native/build leftovers
+*.o
+*.obj
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# --- editor / OS -----------------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.swp
+*.user
+Thumbs.db
+.DS_Store

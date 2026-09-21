@@ -1,0 +1,202 @@
+// src/codegen.dmm - the Strata code generator, written in D-- (a MODULE, no main). CORE.
+//
+// Milestone 1, step 3: the thin vertical slice. Turns the AST into plain C for the
+// subset that lets a program actually RUN end-to-end BEFORE the checker exists
+// (ARCHITECTURE.md sec 7): functions (types-first), integer/bool/float/string values,
+// arithmetic, calls, `if`/`while`/`for..in` over ranges, `return`, and `print`.
+//
+// Deliberately NOT here yet (they need the checker + the lib/ runtime): structs, vec/mat,
+// arenas/regions, arrays, method/UFCS calls. gen_* flags those as errors rather than
+// emitting broken C. `var`/`const` without a checker lean on gcc's `__auto_type`.
+
+#include "parser.dmm"   // AST + Parser (brings lexer/token)
+
+struct Codegen { str out; bool had_error; }
+
+// ---- helpers -----------------------------------------------------------
+
+str cg_indent(int n) { str r = ""; for (int i = 0; i < n; i++) { r = r + "    "; } return r; }
+
+str cg_strip_us(str s) {   // C rejects `_` digit separators; drop them
+    str r = "";
+    for (int i = 0; i < s.len; i++) { if (s[i] != '_') { r = r + substr(s, i, 1); } }
+    return r;
+}
+
+str cg_escape(str s) {     // re-escape a decoded string/char for a C literal
+    str r = "";
+    for (int i = 0; i < s.len; i++) {
+        char c = s[i];
+        if      (c == '"')  { r = r + "\\\""; }
+        else if (c == '\\') { r = r + "\\\\"; }
+        else if (c == '\n') { r = r + "\\n"; }
+        else if (c == '\t') { r = r + "\\t"; }
+        else if (c == '\r') { r = r + "\\r"; }
+        else                { r = r + substr(s, i, 1); }
+    }
+    return r;
+}
+
+str ty_to_c(TypeNode* t) {
+    if (t == null) { return "void"; }
+    switch (t.kind) {
+        case TyNamed:
+            if (t.name == "int")    { return "int64_t"; }
+            if (t.name == "float")  { return "float"; }
+            if (t.name == "bool")   { return "bool"; }
+            if (t.name == "void")   { return "void"; }
+            if (t.name == "string") { return "const char*"; }
+            if (t.name == "char")   { return "char"; }
+            return t.name;                       // pass-through (unsupported until checker/runtime)
+        case TyPointer:    return ty_to_c(t.elem) + "*";
+        case TyArray:      return ty_to_c(t.elem) + "*";   // minimal: decay to pointer
+        case TyFixedArray: return ty_to_c(t.elem) + "*";
+    }
+    return "void";
+}
+
+// ---- expressions -------------------------------------------------------
+
+str gen_call(Codegen* cg, Expr* e) {
+    // `print(x)` is a temporary built-in until the real prelude + checker land: it picks
+    // %s for a string literal, else prints as a 64-bit int.
+    if (e.a.kind == ExName && e.a.text == "print" && e.items.len == 1) {
+        Expr* arg = e.items[0];
+        if (arg.kind == ExStringLit) { return "printf(\"%s\\n\", " + gen_expr(cg, arg) + ")"; }
+        return "printf(\"%lld\\n\", (long long)(" + gen_expr(cg, arg) + "))";
+    }
+    str s = gen_expr(cg, e.a) + "(";
+    for (int i = 0; i < e.items.len; i++) { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
+    return s + ")";
+}
+
+str gen_expr(Codegen* cg, Expr* e) {
+    if (e == null) { return "0"; }
+    switch (e.kind) {
+        case ExIntLit:    return cg_strip_us(e.text);
+        case ExFloatLit:  return cg_strip_us(e.text);
+        case ExStringLit: return "\"" + cg_escape(e.text) + "\"";
+        case ExCharLit:   return "'" + cg_escape(e.text) + "'";
+        case ExBoolLit:   if (e.bval) { return "true"; } return "false";
+        case ExName:      return e.text;
+        case ExUnary:     return "(" + e.text + gen_expr(cg, e.a) + ")";
+        case ExBinary:
+            if (e.text == "..") { cg.had_error = true; return "0"; }   // ranges only in for..in
+            return "(" + gen_expr(cg, e.a) + " " + e.text + " " + gen_expr(cg, e.b) + ")";
+        case ExCall:  return gen_call(cg, e);
+        case ExField: return gen_expr(cg, e.a) + "." + e.field;        // minimal: no ptr distinction
+        case ExIndex: return gen_expr(cg, e.a) + "[" + gen_expr(cg, e.b) + "]";
+        default:      cg.had_error = true; return "0";                 // ArrayLit/StructLit: later
+    }
+    return "0";
+}
+
+// ---- statements --------------------------------------------------------
+
+void gen_braced(Codegen* cg, int ind, Stmt* blk) {
+    cg.out = cg.out + "{\n";
+    if (blk != null && blk.kind == StBlock) {
+        for (int i = 0; i < blk.stmts.len; i++) { gen_stmt(cg, ind + 1, blk.stmts[i]); }
+    }
+    cg.out = cg.out + cg_indent(ind) + "}";
+}
+
+void gen_stmt(Codegen* cg, int ind, Stmt* s) {
+    if (s == null) { return; }
+    switch (s.kind) {
+        case StBlock:
+            cg.out = cg.out + cg_indent(ind); gen_braced(cg, ind, s); cg.out = cg.out + "\n";
+        case StVar:
+            {
+                str ct = "__auto_type";
+                if (s.type != null) { ct = ty_to_c(s.type); }
+                str head = "";
+                if (s.is_const) { head = "const "; }
+                if (s.init != null) {
+                    cg.out = cg.out + cg_indent(ind) + head + ct + " " + s.name + " = " + gen_expr(cg, s.init) + ";\n";
+                } else {
+                    cg.out = cg.out + cg_indent(ind) + head + ct + " " + s.name + ";\n";
+                }
+            }
+        case StReturn:
+            if (s.expr != null) { cg.out = cg.out + cg_indent(ind) + "return " + gen_expr(cg, s.expr) + ";\n"; }
+            else                { cg.out = cg.out + cg_indent(ind) + "return;\n"; }
+        case StExprStmt:
+            cg.out = cg.out + cg_indent(ind) + gen_expr(cg, s.expr) + ";\n";
+        case StAssign:
+            cg.out = cg.out + cg_indent(ind) + gen_expr(cg, s.target) + " " + s.op + " " + gen_expr(cg, s.value) + ";\n";
+        case StIf:
+            cg.out = cg.out + cg_indent(ind) + "if (" + gen_expr(cg, s.cond) + ") ";
+            gen_braced(cg, ind, s.then_block);
+            if (s.else_branch != null) {
+                cg.out = cg.out + " else ";
+                if (s.else_branch.kind == StIf) { cg.out = cg.out + "\n"; gen_stmt(cg, ind, s.else_branch); }
+                else { gen_braced(cg, ind, s.else_branch); cg.out = cg.out + "\n"; }
+            } else {
+                cg.out = cg.out + "\n";
+            }
+        case StWhile:
+            cg.out = cg.out + cg_indent(ind) + "while (" + gen_expr(cg, s.cond) + ") ";
+            gen_braced(cg, ind, s.body); cg.out = cg.out + "\n";
+        case StForIn:
+            if (s.iter != null && s.iter.kind == ExBinary && s.iter.text == "..") {
+                str lo = gen_expr(cg, s.iter.a);
+                str hi = gen_expr(cg, s.iter.b);
+                cg.out = cg.out + cg_indent(ind) + "for (int64_t " + s.name + " = " + lo + "; "
+                       + s.name + " < " + hi + "; " + s.name + "++) ";
+                gen_braced(cg, ind, s.body); cg.out = cg.out + "\n";
+            } else {
+                cg.had_error = true;
+                cg.out = cg.out + cg_indent(ind) + "/* unsupported for-in iterable (needs runtime) */\n";
+            }
+        case StRegion:
+            cg.had_error = true;
+            cg.out = cg.out + cg_indent(ind) + "/* region not supported yet (needs arena runtime) */\n";
+        default:
+            cg.had_error = true;
+    }
+}
+
+// ---- program -----------------------------------------------------------
+
+str func_sig(Decl* d) {
+    str s = ty_to_c(d.ret) + " " + d.name + "(";
+    if (d.params.len == 0) { s = s + "void"; }
+    else {
+        for (int i = 0; i < d.params.len; i++) {
+            if (i > 0) { s = s + ", "; }
+            s = s + ty_to_c(d.params[i].type) + " " + d.params[i].name;
+        }
+    }
+    return s + ")";
+}
+
+str generate(Codegen* cg, Program prog) {
+    cg.out = cg.out + "// Generated by stratac. Do not edit.\n";
+    cg.out = cg.out + "#include <stdint.h>\n";
+    cg.out = cg.out + "#include <stdbool.h>\n";
+    cg.out = cg.out + "#include <stdio.h>\n\n";
+
+    // forward declarations (so functions can call each other / recurse)
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcFunc) { cg.out = cg.out + func_sig(d) + ";\n"; }
+    }
+    cg.out = cg.out + "\n";
+
+    // definitions
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcFunc) {
+            cg.out = cg.out + func_sig(d) + " ";
+            gen_braced(cg, 0, d.body);
+            cg.out = cg.out + "\n\n";
+        }
+    }
+
+    // top-level code = main
+    cg.out = cg.out + "int main(void) {\n";
+    for (int i = 0; i < prog.main.len; i++) { gen_stmt(cg, 1, prog.main[i]); }
+    cg.out = cg.out + "    return 0;\n}\n";
+    return cg.out;
+}

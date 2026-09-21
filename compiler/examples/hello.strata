@@ -1,0 +1,23 @@
+// hello.strata - a first program to exercise the lexer.
+
+struct Entity {
+    vec3 pos
+    vec3 vel
+    int  hp
+}
+
+vec3 update(Entity* e, float dt) {
+    e.pos += e.vel * dt        // '.' auto-derefs; compound assign
+    return e.pos
+}
+
+var world = arena()
+var e = world.new(Entity)
+e.hp = 100
+e.vel = vec3(1, 0, 0)
+
+for i in 0..60 {
+    update(e, 0.016)
+}
+
+print("hello, strata")

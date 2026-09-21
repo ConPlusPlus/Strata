@@ -1,0 +1,100 @@
+  3:1    struct
+  3:8    Ident     Entity
+  3:15   {
+  4:5    Ident     vec3
+  4:10   Ident     pos
+  5:5    NEWLINE
+  5:5    Ident     vec3
+  5:10   Ident     vel
+  6:5    NEWLINE
+  6:5    Ident     int
+  6:10   Ident     hp
+  7:1    NEWLINE
+  7:1    }
+  9:1    NEWLINE
+  9:1    Ident     vec3
+  9:6    Ident     update
+  9:12   (
+  9:13   Ident     Entity
+  9:19   *
+  9:21   Ident     e
+  9:22   ,
+  9:24   Ident     float
+  9:30   Ident     dt
+  9:32   )
+  9:34   {
+ 10:5    Ident     e
+ 10:6    .
+ 10:7    Ident     pos
+ 10:11   +=
+ 10:14   Ident     e
+ 10:15   .
+ 10:16   Ident     vel
+ 10:20   *
+ 10:22   Ident     dt
+ 11:5    NEWLINE
+ 11:5    return
+ 11:12   Ident     e
+ 11:13   .
+ 11:14   Ident     pos
+ 12:1    NEWLINE
+ 12:1    }
+ 14:1    NEWLINE
+ 14:1    var
+ 14:5    Ident     world
+ 14:11   =
+ 14:13   Ident     arena
+ 14:18   (
+ 14:19   )
+ 15:1    NEWLINE
+ 15:1    var
+ 15:5    Ident     e
+ 15:7    =
+ 15:9    Ident     world
+ 15:14   .
+ 15:15   Ident     new
+ 15:18   (
+ 15:19   Ident     Entity
+ 15:25   )
+ 16:1    NEWLINE
+ 16:1    Ident     e
+ 16:2    .
+ 16:3    Ident     hp
+ 16:6    =
+ 16:8    Int       100
+ 17:1    NEWLINE
+ 17:1    Ident     e
+ 17:2    .
+ 17:3    Ident     vel
+ 17:7    =
+ 17:9    Ident     vec3
+ 17:13   (
+ 17:14   Int       1
+ 17:15   ,
+ 17:17   Int       0
+ 17:18   ,
+ 17:20   Int       0
+ 17:21   )
+ 19:1    NEWLINE
+ 19:1    for
+ 19:5    Ident     i
+ 19:7    in
+ 19:10   Int       0
+ 19:11   ..
+ 19:13   Int       60
+ 19:16   {
+ 20:5    Ident     update
+ 20:11   (
+ 20:12   Ident     e
+ 20:13   ,
+ 20:15   Float     0.016
+ 20:20   )
+ 21:1    NEWLINE
+ 21:1    }
+ 23:1    NEWLINE
+ 23:1    Ident     print
+ 23:6    (
+ 23:7    String    hello, strata
+ 23:22   )
+ 24:1    NEWLINE
+ 24:1    EOF

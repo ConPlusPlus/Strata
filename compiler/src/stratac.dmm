@@ -1,0 +1,144 @@
+// src/stratac.dmm - the Strata compiler driver (front-end #1: the CLI, `stratac`).
+// Thin: CLI + orchestration only (ARCHITECTURE.md rule #4). Pulls in the shared
+// renderer (dump.dmm), which pulls in the whole core (incl. codegen).
+//
+//   stratac tokens <file.strata>   print the token stream
+//   stratac ast    <file.strata>   parse and print the AST
+//   stratac emit   <file.strata>   print the generated C
+//   stratac build  <file.strata>   compile to a native executable
+//   stratac run    <file.strata>   compile and run
+
+#include "dump.dmm"    // print_tokens / print_program (+ the core via core.dmm)
+#include <stdlib.h>    // system()  (C header, passed through to the generated C)
+
+str stratac_version() { return "0.4.0 (lexer + parser + checker + minimal codegen)"; }
+
+// ---- paths -------------------------------------------------------------
+
+str stem_of(str p) {
+    int dot = 0 - 1;
+    int slash = 0 - 1;
+    for (int i = 0; i < p.len; i++) {
+        if (p[i] == '.') { dot = i; }
+        if (p[i] == '/' || p[i] == '\\') { slash = i; }
+    }
+    if (dot >= 0 && (slash < 0 || dot > slash)) { return substr(p, 0, dot); }
+    return p;
+}
+
+str basename_of(str p) {
+    int slash = 0 - 1;
+    for (int i = 0; i < p.len; i++) { if (p[i] == '/' || p[i] == '\\') { slash = i; } }
+    return substr(p, slash + 1, p.len - (slash + 1));
+}
+
+// ---- pipeline helpers --------------------------------------------------
+
+int cmd_tokens(str path) {
+    print_tokens(lex(read_file(path)));
+    return 0;
+}
+
+int cmd_ast(str path) {
+    Token[] toks = lex(read_file(path));
+    Parser p = Parser{ toks, 0, false, false };
+    Program prog = parse_program(&p);
+    if (p.had_error) { print("parse error in " + path); return 1; }
+    print_program(prog);
+    return 0;
+}
+
+int cmd_check(str path) {
+    Token[] toks = lex(read_file(path));
+    Parser p = Parser{ toks, 0, false, false };
+    Program prog = parse_program(&p);
+    if (p.had_error) { print("parse error in " + path); return 1; }
+    Checker* ck = new_checker(basename_of(path));
+    ck_check(ck, prog);
+    if (ck.had_error) { return 1; }
+    print("no type errors");
+    return 0;
+}
+
+int cmd_emit(str path) {
+    Token[] toks = lex(read_file(path));
+    Parser p = Parser{ toks, 0, false, false };
+    Program prog = parse_program(&p);
+    if (p.had_error) { print("parse error in " + path); return 1; }
+    Checker* ck = new_checker(basename_of(path));
+    ck_check(ck, prog);
+    if (ck.had_error) { return 1; }
+    Codegen cg = Codegen{ "", false };
+    str out = generate(&cg, prog);
+    if (cg.had_error) { print("codegen: program uses features not supported yet"); return 1; }
+    printf(cstr("%s"), cstr(out));   // verbatim, like fputs
+    return 0;
+}
+
+bool build_exe(str path, bool quiet) {
+    Token[] toks = lex(read_file(path));
+    Parser p = Parser{ toks, 0, false, false };
+    Program prog = parse_program(&p);
+    if (p.had_error) { print("parse error in " + path); return false; }
+    Checker* ck = new_checker(basename_of(path));
+    ck_check(ck, prog);
+    if (ck.had_error) { return false; }
+    Codegen cg = Codegen{ "", false };
+    str c = generate(&cg, prog);
+    if (cg.had_error) { print("codegen: program uses features not supported yet"); return false; }
+
+    str stem = stem_of(path);
+    str cpath = stem + ".c";
+    str exepath = stem + ".exe";
+    write_file(cpath, c);
+
+    // gnu11 for __auto_type (the `var` lowering until the checker infers types).
+    str cmd = "gcc -std=gnu11 -O2 \"" + cpath + "\" -o \"" + exepath + "\"";
+    int rc = system(cstr(cmd));
+    if (rc != 0) { return false; }
+    if (!quiet) { print("built " + exepath); }
+    return true;
+}
+
+int cmd_run(str path, str[] args) {
+    if (!build_exe(path, true)) { return 1; }
+    str exe = stem_of(path) + ".exe";
+    str exe2 = "";
+    for (int i = 0; i < exe.len; i++) {
+        if (exe[i] == '/') { exe2 = exe2 + "\\"; } else { exe2 = exe2 + substr(exe, i, 1); }
+    }
+    str runcmd = "\"" + exe2 + "\"";
+    for (int i = 3; i < args.len; i++) { runcmd = runcmd + " \"" + args[i] + "\""; }
+    runcmd = "\"" + runcmd + "\"";   // cmd.exe strips the outer quote pair
+    return system(cstr(runcmd));
+}
+
+int usage() {
+    print("stratac - the Strata compiler");
+    print("usage:");
+    print("  stratac run    <file.strata>   compile and run");
+    print("  stratac build  <file.strata>   compile to a native executable");
+    print("  stratac check  <file.strata>   type-check only");
+    print("  stratac emit   <file.strata>   print the generated C");
+    print("  stratac ast    <file.strata>   parse and print the AST");
+    print("  stratac tokens <file.strata>   print the token stream");
+    return 2;
+}
+
+int main(str[] args) {
+    if (args.len == 2 && (args[1] == "version" || args[1] == "--version")) {
+        print("stratac " + stratac_version() + " - the Strata compiler");
+        return 0;
+    }
+    if (args.len < 3) { return usage(); }
+
+    str cmd  = args[1];
+    str file = args[2];
+    if (cmd == "tokens") { return cmd_tokens(file); }
+    if (cmd == "ast")    { return cmd_ast(file); }
+    if (cmd == "check")  { return cmd_check(file); }
+    if (cmd == "emit")   { return cmd_emit(file); }
+    if (cmd == "build")  { if (build_exe(file, false)) { return 0; } return 1; }
+    if (cmd == "run")    { return cmd_run(file, args); }
+    return usage();
+}

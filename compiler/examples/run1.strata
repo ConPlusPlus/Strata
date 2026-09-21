@@ -1,0 +1,23 @@
+// run1.strata - the first program Strata can actually run (milestone 1, step 3).
+// Uses only the runnable subset: functions, integers, control flow, print.
+
+int add(int a, int b) {
+    return a + b
+}
+
+int fib(int n) {
+    if n < 2 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+print("hello from strata")
+
+var sum = add(2, 3)
+print(sum)
+print(fib(10))
+
+for i in 0..5 {
+    print(i)
+}

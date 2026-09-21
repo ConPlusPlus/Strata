@@ -1,0 +1,592 @@
+// src/checker.dmm - the Strata type checker (a.k.a. sema), written in D-- (a MODULE,
+// no main). CORE. Milestone 1, step 4.
+//
+// AST -> validated + inferred AST. Does name resolution (scopes), type checking, arity,
+// assignability, `var` inference, and condition/return checks. Reports located errors,
+// recovering so it can report many at once (ARCHITECTURE.md sec 3). Runs BEFORE codegen.
+//
+// Structure mirrors D--'s checker within D--'s constraints (no maps; append-only arrays):
+//   - the scope stack is a linked list of Scope nodes (push = child, pop = parent);
+//   - structs/funcs/enums are global append-only arrays, searched linearly.
+// Strata specifics: StVar (not StLet), StForIn with `..` ranges, top-level `main`, and
+// `var` inference writes the resolved type back onto the AST node for codegen to use.
+
+#include "ast.hmm"
+
+// ---- checker types -----------------------------------------------------
+
+enum TCat { TcInt, TcFloat, TcBool, TcChar, TcStr, TcVoid, TcStruct, TcArray, TcPointer, TcUnknown }
+
+struct Type {
+    TCat  cat;
+    str   name;    // display name; struct name for TcStruct
+    Type* elem;    // element (Array) / pointee (Pointer)
+}
+
+Type* ty(TCat c, str n)  { return new Type{ c, n, null }; }
+Type* ty_arr(Type* e)    { return new Type{ TcArray, "array", e }; }
+Type* ty_ptr(Type* e)    { return new Type{ TcPointer, "pointer", e }; }
+
+bool t_is_numeric(Type* t) { return t.cat == TcInt || t.cat == TcFloat; }
+bool t_is_integer(Type* t) { return t.cat == TcInt; }
+bool t_is_unknown(Type* t) { return t.cat == TcUnknown; }
+bool t_ordered(Type* t)    { return t_is_numeric(t) || t.cat == TcChar; }
+
+str t_str(Type* t) {
+    switch (t.cat) {
+        case TcInt:     return t.name;
+        case TcFloat:   return t.name;
+        case TcStruct:  return t.name;
+        case TcBool:    return "bool";
+        case TcChar:    return "char";
+        case TcStr:     return "string";
+        case TcVoid:    return "void";
+        case TcArray:   if (t.elem != null) { return t_str(t.elem) + "[]"; } return "?[]";
+        case TcPointer: if (t.elem != null) { return t_str(t.elem) + "*"; } return "?*";
+        default:        return "?";
+    }
+    return "?";
+}
+
+// Convert a checker Type back to an AST TypeNode, so `var` inference can annotate the
+// AST for codegen (canonical names so codegen's ty_to_c maps them).
+TypeNode* named_node(str n) { TypeNode* t = new_type(TyNamed, 0, 0); t.name = n; return t; }
+TypeNode* type_to_node(Type* t) {
+    if (t == null) { return null; }
+    switch (t.cat) {
+        case TcInt:     return named_node("int");
+        case TcFloat:   return named_node("float");
+        case TcBool:    return named_node("bool");
+        case TcChar:    return named_node("char");
+        case TcStr:     return named_node("string");
+        case TcStruct:  return named_node(t.name);
+        case TcPointer: { TypeNode* n = new_type(TyPointer, 0, 0); n.elem = type_to_node(t.elem); return n; }
+        case TcArray:   { TypeNode* n = new_type(TyArray, 0, 0);   n.elem = type_to_node(t.elem); return n; }
+        default:        return null;   // unknown -> leave codegen's __auto_type fallback
+    }
+    return null;
+}
+
+// ---- symbol tables -----------------------------------------------------
+
+struct VarInfo   { str name; Type* type; bool is_const; }
+struct Scope     { VarInfo[] vars; Scope* parent; }
+struct FieldInfo { str name; Type* type; }
+struct StructInfo{ str name; FieldInfo[] fields; }
+struct FuncInfo  { str name; Type*[] params; Type* ret; }
+struct EnumMember{ str member; str enum_name; }
+
+struct Checker {
+    str          file;
+    bool         had_error;
+    StructInfo[] structs;
+    FuncInfo[]   funcs;
+    str[]        enums;
+    EnumMember[] enum_members;
+    Scope*       scope;
+    Type*        cur_ret;
+}
+
+struct LookupResult { bool found; Type* type; bool is_const; }
+struct LvalueResult { bool ok; bool is_const; }
+
+void ck_error(Checker* c, int line, int col, str msg) {
+    c.had_error = true;
+    print(c.file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg);
+}
+
+// ---- table helpers -----------------------------------------------------
+
+int ck_struct_index(Checker* c, str name) {
+    for (int i = 0; i < c.structs.len; i++) { if (c.structs[i].name == name) { return i; } }
+    return 0 - 1;
+}
+int ck_func_index(Checker* c, str name) {
+    for (int i = 0; i < c.funcs.len; i++) { if (c.funcs[i].name == name) { return i; } }
+    return 0 - 1;
+}
+bool ck_enum_has(Checker* c, str name) {
+    for (int i = 0; i < c.enums.len; i++) { if (c.enums[i] == name) { return true; } }
+    return false;
+}
+str ck_enum_member(Checker* c, str name) {
+    for (int i = 0; i < c.enum_members.len; i++) {
+        if (c.enum_members[i].member == name) { return c.enum_members[i].enum_name; }
+    }
+    return "";
+}
+
+// ---- types -------------------------------------------------------------
+
+Type* ck_prim(str n) {
+    if (n == "int" || n == "i64" || n == "i32" || n == "i16" || n == "i8"
+        || n == "uint" || n == "u64" || n == "u32" || n == "u16" || n == "u8") { return ty(TcInt, n); }
+    if (n == "float" || n == "f64" || n == "f32") { return ty(TcFloat, n); }
+    if (n == "bool")   { return ty(TcBool, n); }
+    if (n == "char")   { return ty(TcChar, n); }
+    if (n == "string") { return ty(TcStr, n); }
+    if (n == "void")   { return ty(TcVoid, n); }
+    return null;
+}
+
+Type* ck_type(Checker* c, TypeNode* t) {
+    if (t == null) { return ty(TcVoid, "void"); }
+    if (t.kind == TyArray || t.kind == TyFixedArray) { return ty_arr(ck_type(c, t.elem)); }
+    if (t.kind == TyPointer) { return ty_ptr(ck_type(c, t.elem)); }
+    Type* p = ck_prim(t.name);
+    if (p != null) { return p; }
+    if (ck_struct_index(c, t.name) >= 0) { return ty(TcStruct, t.name); }
+    if (ck_enum_has(c, t.name)) { return ty(TcInt, t.name); }
+    ck_error(c, t.line, t.col, "unknown type '" + t.name + "'");
+    return ty(TcUnknown, "?");
+}
+
+bool ck_assignable(Type* target, Type* value) {
+    if (target.cat == TcUnknown || value.cat == TcUnknown) { return true; }
+    switch (target.cat) {
+        case TcInt:    return value.cat == TcInt;
+        case TcFloat:  return value.cat == TcFloat || value.cat == TcInt;
+        case TcBool:   return value.cat == TcBool;
+        case TcChar:   return value.cat == TcChar;
+        case TcStr:    return value.cat == TcStr;
+        case TcStruct: return value.cat == TcStruct && value.name == target.name;
+        case TcArray:
+            if (value.cat != TcArray) { return false; }
+            if (value.elem != null && value.elem.cat == TcUnknown) { return true; }
+            return target.elem != null && value.elem != null && ck_assignable(target.elem, value.elem);
+        case TcPointer:
+            if (value.cat != TcPointer) { return false; }
+            if (value.elem != null && value.elem.cat == TcUnknown) { return true; }
+            return target.elem != null && value.elem != null && ck_assignable(target.elem, value.elem);
+        default: return false;
+    }
+    return false;
+}
+
+// ---- scopes ------------------------------------------------------------
+
+void ck_push(Checker* c) { VarInfo[] v = []; c.scope = new Scope{ v, c.scope }; }
+void ck_pop(Checker* c)  { c.scope = c.scope.parent; }
+
+bool ck_declare(Checker* c, str name, Type* t, bool is_const, int line, int col) {
+    for (int i = 0; i < c.scope.vars.len; i++) {
+        if (c.scope.vars[i].name == name) {
+            ck_error(c, line, col, "'" + name + "' is already declared in this scope");
+            return false;
+        }
+    }
+    c.scope.vars.push(VarInfo{ name, t, is_const });
+    return true;
+}
+
+LookupResult ck_lookup(Checker* c, str name) {
+    Scope* s = c.scope;
+    while (s != null) {
+        for (int i = 0; i < s.vars.len; i++) {
+            if (s.vars[i].name == name) { return LookupResult{ true, s.vars[i].type, s.vars[i].is_const }; }
+        }
+        s = s.parent;
+    }
+    return LookupResult{ false, null, false };
+}
+
+// ---- lvalues -----------------------------------------------------------
+
+LvalueResult ck_lvalue(Checker* c, Expr* e) {
+    switch (e.kind) {
+        case ExName:
+            {
+                LookupResult v = ck_lookup(c, e.text);
+                bool cst = false;
+                if (v.found) { cst = v.is_const; }
+                return LvalueResult{ true, cst };
+            }
+        case ExField: return ck_lvalue(c, e.a);
+        case ExIndex: return ck_lvalue(c, e.a);
+        case ExUnary: if (e.text == "*") { return LvalueResult{ true, false }; } return LvalueResult{ false, false };
+        default:      return LvalueResult{ false, false };
+    }
+    return LvalueResult{ false, false };
+}
+
+// ---- expressions -------------------------------------------------------
+
+Type* ck_expr(Checker* c, Expr* e) {
+    switch (e.kind) {
+        case ExIntLit:    return ty(TcInt, "int");
+        case ExFloatLit:  return ty(TcFloat, "float");
+        case ExBoolLit:   return ty(TcBool, "bool");
+        case ExStringLit: return ty(TcStr, "string");
+        case ExCharLit:   return ty(TcChar, "char");
+
+        case ExName:
+            {
+                LookupResult v = ck_lookup(c, e.text);
+                if (v.found) { return v.type; }
+                str en = ck_enum_member(c, e.text);
+                if (en != "") { return ty(TcInt, en); }
+                ck_error(c, e.line, e.col, "use of undeclared name '" + e.text + "'");
+                return ty(TcUnknown, "?");
+            }
+
+        case ExUnary:
+            {
+                if (e.text == "&") {
+                    LvalueResult lv = ck_lvalue(c, e.a);
+                    if (!lv.ok) { ck_error(c, e.line, e.col, "cannot take the address of a non-lvalue"); }
+                    return ty_ptr(ck_expr(c, e.a));
+                }
+                Type* t = ck_expr(c, e.a);
+                if (e.text == "*") {
+                    if (t.cat == TcPointer) { if (t.elem != null) { return t.elem; } return ty(TcUnknown, "?"); }
+                    if (!t_is_unknown(t)) { ck_error(c, e.line, e.col, "cannot dereference a value of type " + t_str(t)); }
+                    return ty(TcUnknown, "?");
+                }
+                if (e.text == "!") {
+                    if (t.cat != TcBool && !t_is_unknown(t)) { ck_error(c, e.line, e.col, "'!' requires bool, got " + t_str(t)); }
+                    return ty(TcBool, "bool");
+                }
+                if (e.text == "~") {
+                    if (!t_is_integer(t) && t.cat != TcChar && !t_is_unknown(t)) { ck_error(c, e.line, e.col, "'~' requires an integer operand, got " + t_str(t)); }
+                    return t;
+                }
+                if (!t_is_numeric(t) && !t_is_unknown(t)) { ck_error(c, e.line, e.col, "'-' requires a numeric operand, got " + t_str(t)); }
+                return t;
+            }
+
+        case ExBinary:
+            {
+                str op = e.text;
+                if (op == "..") {
+                    ck_error(c, e.line, e.col, "range '..' is only valid as a for-in loop range");
+                    ck_expr(c, e.a); ck_expr(c, e.b);
+                    return ty(TcUnknown, "?");
+                }
+                Type* lt = ck_expr(c, e.a);
+                Type* rt = ck_expr(c, e.b);
+                if (op == "&&" || op == "||") {
+                    if ((lt.cat != TcBool && !t_is_unknown(lt)) || (rt.cat != TcBool && !t_is_unknown(rt))) {
+                        ck_error(c, e.line, e.col, "'" + op + "' requires bool operands");
+                    }
+                    return ty(TcBool, "bool");
+                }
+                if (op == "==" || op == "!=") {
+                    if (!t_is_unknown(lt) && !t_is_unknown(rt) && lt.cat != rt.cat && !(t_ordered(lt) && t_ordered(rt))) {
+                        ck_error(c, e.line, e.col, "cannot compare " + t_str(lt) + " and " + t_str(rt));
+                    }
+                    return ty(TcBool, "bool");
+                }
+                if (op == "<" || op == "<=" || op == ">" || op == ">=") {
+                    if ((!t_ordered(lt) && !t_is_unknown(lt)) || (!t_ordered(rt) && !t_is_unknown(rt))) {
+                        ck_error(c, e.line, e.col, "'" + op + "' requires numeric operands");
+                    }
+                    return ty(TcBool, "bool");
+                }
+                if (op == "+" && (lt.cat == TcStr || rt.cat == TcStr)) {
+                    if (!t_is_unknown(lt) && !t_is_unknown(rt) && !(lt.cat == TcStr && rt.cat == TcStr)) {
+                        ck_error(c, e.line, e.col, "cannot concatenate " + t_str(lt) + " and " + t_str(rt));
+                    }
+                    return ty(TcStr, "string");
+                }
+                if (op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>") {
+                    if ((!t_is_integer(lt) && lt.cat != TcChar && !t_is_unknown(lt))
+                        || (!t_is_integer(rt) && rt.cat != TcChar && !t_is_unknown(rt))) {
+                        ck_error(c, e.line, e.col, "'" + op + "' requires integer operands, got " + t_str(lt) + " and " + t_str(rt));
+                    }
+                    return ty(TcInt, "int");
+                }
+                if ((!t_ordered(lt) && !t_is_unknown(lt)) || (!t_ordered(rt) && !t_is_unknown(rt))) {
+                    ck_error(c, e.line, e.col, "'" + op + "' requires numeric operands, got " + t_str(lt) + " and " + t_str(rt));
+                    return ty(TcUnknown, "?");
+                }
+                if (op == "%" && (lt.cat == TcFloat || rt.cat == TcFloat)) { ck_error(c, e.line, e.col, "'%' requires integer operands"); }
+                if (lt.cat == TcFloat || rt.cat == TcFloat) { return ty(TcFloat, "float"); }
+                return ty(TcInt, "int");
+            }
+
+        case ExCall: return ck_call(c, e);
+
+        case ExField:
+            {
+                Type* ot = ck_expr(c, e.a);
+                if (t_is_unknown(ot)) { return ty(TcUnknown, "?"); }
+                if (ot.cat == TcStr || ot.cat == TcArray) {
+                    if (e.field == "len") { return ty(TcInt, "int"); }
+                    ck_error(c, e.line, e.col, t_str(ot) + " has no field '" + e.field + "' (did you mean 'len'?)");
+                    return ty(TcUnknown, "?");
+                }
+                str sname = "";
+                if (ot.cat == TcStruct) { sname = ot.name; }
+                else if (ot.cat == TcPointer && ot.elem != null && ot.elem.cat == TcStruct) { sname = ot.elem.name; }
+                else { ck_error(c, e.line, e.col, "type " + t_str(ot) + " has no fields"); return ty(TcUnknown, "?"); }
+                int si = ck_struct_index(c, sname);
+                if (si >= 0) {
+                    for (int i = 0; i < c.structs[si].fields.len; i++) {
+                        if (c.structs[si].fields[i].name == e.field) { return c.structs[si].fields[i].type; }
+                    }
+                }
+                ck_error(c, e.line, e.col, "struct " + sname + " has no field '" + e.field + "'");
+                return ty(TcUnknown, "?");
+            }
+
+        case ExIndex:
+            {
+                Type* ot = ck_expr(c, e.a);
+                Type* it = ck_expr(c, e.b);
+                if (!t_is_integer(it) && !t_is_unknown(it)) { ck_error(c, e.line, e.col, "index must be an integer, got " + t_str(it)); }
+                if (ot.cat == TcStr) { return ty(TcChar, "char"); }
+                if (ot.cat == TcArray)   { if (ot.elem != null) { return ot.elem; } return ty(TcUnknown, "?"); }
+                if (ot.cat == TcPointer) { if (ot.elem != null) { return ot.elem; } return ty(TcUnknown, "?"); }
+                if (!t_is_unknown(ot)) { ck_error(c, e.line, e.col, "cannot index a value of type " + t_str(ot)); }
+                return ty(TcUnknown, "?");
+            }
+
+        case ExArrayLit:
+            {
+                if (e.items.len == 0) { return ty_arr(ty(TcUnknown, "?")); }
+                Type* first = ck_expr(c, e.items[0]);
+                for (int i = 1; i < e.items.len; i++) {
+                    Type* et = ck_expr(c, e.items[i]);
+                    if (!ck_assignable(first, et) && !ck_assignable(et, first)) {
+                        ck_error(c, e.items[i].line, e.items[i].col, "array element " + int_to_str(i + 1) + " has type " + t_str(et) + ", expected " + t_str(first));
+                    }
+                }
+                return ty_arr(first);
+            }
+
+        case ExStructLit:
+            {
+                int si = ck_struct_index(c, e.type_name);
+                if (si < 0) {
+                    ck_error(c, e.line, e.col, "unknown struct '" + e.type_name + "'");
+                    for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+                    return ty(TcUnknown, "?");
+                }
+                int nf = c.structs[si].fields.len;
+                if (e.items.len != nf) { ck_error(c, e.line, e.col, "struct " + e.type_name + " has " + int_to_str(nf) + " field(s), but " + int_to_str(e.items.len) + " given"); }
+                int k = e.items.len;
+                if (nf < k) { k = nf; }
+                for (int i = 0; i < k; i++) {
+                    Type* at = ck_expr(c, e.items[i]);
+                    if (!ck_assignable(c.structs[si].fields[i].type, at)) {
+                        ck_error(c, e.items[i].line, e.items[i].col, "field '" + c.structs[si].fields[i].name + "' of " + e.type_name + " expects " + t_str(c.structs[si].fields[i].type) + ", got " + t_str(at));
+                    }
+                }
+                for (int i = k; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+                return ty(TcStruct, e.type_name);
+            }
+
+        default:
+            return ty(TcUnknown, "?");
+    }
+    return ty(TcUnknown, "?");
+}
+
+Type* ck_call(Checker* c, Expr* e) {
+    Expr* callee = e.a;
+
+    // method-style call `x.f(...)` - not resolved yet (UFCS/methods are backlog); check
+    // the receiver + args so names still resolve, and yield unknown.
+    if (callee.kind == ExField) {
+        ck_expr(c, callee.a);
+        for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+        return ty(TcUnknown, "?");
+    }
+
+    if (callee.kind == ExName) {
+        str name = callee.text;
+
+        // temporary built-in until the real prelude lands
+        if (name == "print") {
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, "print() takes exactly one argument"); }
+            for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+            return ty(TcVoid, "void");
+        }
+
+        int fi = ck_func_index(c, name);
+        if (fi >= 0) {
+            int np = c.funcs[fi].params.len;
+            if (e.items.len != np) { ck_error(c, e.line, e.col, "function '" + name + "' expects " + int_to_str(np) + " argument(s), got " + int_to_str(e.items.len)); }
+            int k = e.items.len;
+            if (np < k) { k = np; }
+            for (int i = 0; i < k; i++) {
+                Type* at = ck_expr(c, e.items[i]);
+                if (!ck_assignable(c.funcs[fi].params[i], at)) {
+                    ck_error(c, e.items[i].line, e.items[i].col, "argument " + int_to_str(i + 1) + " to '" + name + "' expects " + t_str(c.funcs[fi].params[i]) + ", got " + t_str(at));
+                }
+            }
+            for (int i = k; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+            return c.funcs[fi].ret;
+        }
+
+        // constructor-style call `vec3(...)`, or an unknown name: check args, yield unknown
+        ck_error(c, e.line, e.col, "call to undeclared function '" + name + "'");
+        for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+        return ty(TcUnknown, "?");
+    }
+
+    for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+    return ty(TcUnknown, "?");
+}
+
+// ---- statements --------------------------------------------------------
+
+void ck_block(Checker* c, Stmt* b) {
+    ck_push(c);
+    for (int i = 0; i < b.stmts.len; i++) { ck_stmt(c, b.stmts[i]); }
+    ck_pop(c);
+}
+
+void ck_stmt(Checker* c, Stmt* s) {
+    switch (s.kind) {
+        case StBlock:
+            ck_block(c, s);
+        case StVar:
+            {
+                Type* declared = ty(TcUnknown, "?");
+                if (s.type != null) { declared = ck_type(c, s.type); }
+                if (s.init != null) {
+                    Type* vt = ck_expr(c, s.init);
+                    if (s.type == null) {
+                        declared = vt;
+                        s.type = type_to_node(vt);   // write inference back for codegen
+                    } else {
+                        if (!ck_assignable(declared, vt)) {
+                            ck_error(c, s.line, s.col, "cannot initialize '" + s.name + "' of type " + t_str(declared) + " with a value of type " + t_str(vt));
+                        }
+                    }
+                } else {
+                    if (s.type == null) { ck_error(c, s.line, s.col, "'var' requires an initializer"); }
+                }
+                ck_declare(c, s.name, declared, s.is_const, s.line, s.col);
+            }
+        case StReturn:
+            {
+                if (s.expr != null) {
+                    Type* vt = ck_expr(c, s.expr);
+                    if (c.cur_ret.cat == TcVoid) { ck_error(c, s.line, s.col, "returning a value from a void function"); }
+                    else if (!ck_assignable(c.cur_ret, vt)) { ck_error(c, s.line, s.col, "returning " + t_str(vt) + " from a function declared to return " + t_str(c.cur_ret)); }
+                } else {
+                    if (c.cur_ret.cat != TcVoid) { ck_error(c, s.line, s.col, "missing return value; function returns " + t_str(c.cur_ret)); }
+                }
+            }
+        case StExprStmt:
+            ck_expr(c, s.expr);
+        case StAssign:
+            {
+                LvalueResult lv = ck_lvalue(c, s.target);
+                if (!lv.ok) { ck_error(c, s.line, s.col, "left side of '" + s.op + "' is not assignable"); }
+                else if (lv.is_const) { ck_error(c, s.line, s.col, "cannot assign to a const variable"); }
+                Type* tt = ck_expr(c, s.target);
+                Type* vt = ck_expr(c, s.value);
+                if (s.op != "=" && !t_is_numeric(tt) && !t_is_unknown(tt)) { ck_error(c, s.line, s.col, "'" + s.op + "' requires a numeric operand, got " + t_str(tt)); }
+                if (!ck_assignable(tt, vt)) { ck_error(c, s.line, s.col, "cannot assign " + t_str(vt) + " to " + t_str(tt)); }
+            }
+        case StIf:
+            {
+                Type* cd = ck_expr(c, s.cond);
+                if (cd.cat != TcBool && !t_is_unknown(cd)) { ck_error(c, s.line, s.col, "if condition must be bool, got " + t_str(cd)); }
+                ck_block(c, s.then_block);
+                if (s.else_branch != null) { ck_stmt(c, s.else_branch); }
+            }
+        case StWhile:
+            {
+                Type* cd = ck_expr(c, s.cond);
+                if (cd.cat != TcBool && !t_is_unknown(cd)) { ck_error(c, s.line, s.col, "while condition must be bool, got " + t_str(cd)); }
+                ck_block(c, s.body);
+            }
+        case StForIn:
+            {
+                // v1: the iterable must be an integer range `lo..hi`; the loop var is int.
+                if (s.iter != null && s.iter.kind == ExBinary && s.iter.text == "..") {
+                    Type* lo = ck_expr(c, s.iter.a);
+                    Type* hi = ck_expr(c, s.iter.b);
+                    if (!t_is_integer(lo) && !t_is_unknown(lo)) { ck_error(c, s.iter.line, s.iter.col, "range start must be an integer, got " + t_str(lo)); }
+                    if (!t_is_integer(hi) && !t_is_unknown(hi)) { ck_error(c, s.iter.line, s.iter.col, "range end must be an integer, got " + t_str(hi)); }
+                } else {
+                    ck_error(c, s.line, s.col, "for-in currently supports only an integer range 'lo..hi'");
+                    if (s.iter != null) { ck_expr(c, s.iter); }
+                }
+                ck_push(c);
+                ck_declare(c, s.name, ty(TcInt, "int"), false, s.line, s.col);
+                ck_block(c, s.body);
+                ck_pop(c);
+            }
+        case StRegion:
+            ck_block(c, s.body);
+        default:
+            {
+            }
+    }
+}
+
+void ck_func(Checker* c, Decl* f) {
+    c.cur_ret = ck_type(c, f.ret);
+    ck_push(c);
+    for (int i = 0; i < f.params.len; i++) {
+        ck_declare(c, f.params[i].name, ck_type(c, f.params[i].type), false, f.line, f.col);
+    }
+    ck_block(c, f.body);
+    ck_pop(c);
+}
+
+// ---- program -----------------------------------------------------------
+
+bool ck_check(Checker* c, Program prog) {
+    // pass 1a: enums + members
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcEnum) {
+            c.enums.push(d.name);
+            for (int m = 0; m < d.members.len; m++) {
+                str mem = d.members[m];
+                if (ck_enum_member(c, mem) != "") { ck_error(c, d.line, d.col, "enum member '" + mem + "' is already defined"); }
+                c.enum_members.push(EnumMember{ mem, d.name });
+            }
+        }
+    }
+    // pass 1b: struct names
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcStruct) { FieldInfo[] ff = []; c.structs.push(StructInfo{ d.name, ff }); }
+    }
+    // pass 1c: struct fields
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcStruct) {
+            int si = ck_struct_index(c, d.name);
+            for (int fld = 0; fld < d.fields.len; fld++) {
+                c.structs[si].fields.push(FieldInfo{ d.fields[fld].name, ck_type(c, d.fields[fld].type) });
+            }
+        }
+    }
+    // pass 1d: function signatures
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcFunc) {
+            if (ck_func_index(c, d.name) >= 0) { ck_error(c, d.line, d.col, "function '" + d.name + "' is already defined"); }
+            Type*[] ps = [];
+            for (int pi = 0; pi < d.params.len; pi++) { ps.push(ck_type(c, d.params[pi].type)); }
+            c.funcs.push(FuncInfo{ d.name, ps, ck_type(c, d.ret) });
+        }
+    }
+    // pass 2: function bodies
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcFunc) { ck_func(c, d); }
+    }
+    // pass 3: top-level code (the implicit main)
+    c.cur_ret = ty(TcVoid, "void");
+    ck_push(c);
+    for (int i = 0; i < prog.main.len; i++) { ck_stmt(c, prog.main[i]); }
+    ck_pop(c);
+    return !c.had_error;
+}
+
+Checker* new_checker(str file) {
+    StructInfo[] ss = [];
+    FuncInfo[]   fs = [];
+    str[]        es = [];
+    EnumMember[] ems = [];
+    return new Checker{ file, false, ss, fs, es, ems, null, ty(TcVoid, "void") };
+}
