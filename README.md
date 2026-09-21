@@ -72,4 +72,11 @@ powershell -ExecutionPolicy Bypass -File compiler\tests\run.ps1
 
 ## License
 
-Not yet chosen (candidates: MIT / Apache-2.0 / zlib). See `Strata.md` §6.
+The Strata **compiler** is licensed under **GPL-3.0** ([`LICENSE`](LICENSE)) — modify it
+and distribute your version, and you publish your source (the "Linux approach").
+
+The Strata **runtime** carries a linking exception ([`LICENSE-RUNTIME.md`](LICENSE-RUNTIME.md)),
+so **programs you build with Strata are entirely yours** — license and sell them under any
+terms you like, open or closed. The GPL covers the compiler, never what you make with it.
+
+*("Strata" name/trademark policy is still to be determined.)*

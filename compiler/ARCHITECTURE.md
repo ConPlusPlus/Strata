@@ -53,7 +53,7 @@ compiler/
 │  ├─ ast.hmm           shared data: node kinds (tagged union) + node structs
 │  ├─ lexer.dmm         text → tokens
 │  ├─ parser.dmm        tokens → AST
-│  ├─ checker.dmm       AST → typed AST            (not yet)
+│  ├─ checker.dmm       AST → validated/inferred AST
 │  ├─ codegen.dmm       typed AST → C
 │  ├─ core.dmm          umbrella include = the whole core, main-free
 │  │  ── shared front-end utility ──
@@ -183,7 +183,9 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
 3. ✅ **Minimal `codegen.dmm`** — functions, arithmetic, `if`/`while`/`for..in`, `return`,
    `var` (via `__auto_type`), and a temporary `print`. *Done — `stratac run run1.strata`
    compiles to C via gcc and runs end-to-end; golden-tested (`run/run1`).*
-4. `checker.dmm` — name resolution + types + `stratac check`.
+4. ✅ `checker.dmm` — name resolution (linked-list scopes), type checking, arity,
+   assignability, `var` inference (written back to the AST for codegen), `stratac check`.
+   *Done — errors are located + recovering; golden-tested (`check/run1`, `check/errors`).*
 5. `lib/arena.h` runtime + `arena()` / `region { }` lowering.
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
