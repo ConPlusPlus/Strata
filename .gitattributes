@@ -3,3 +3,16 @@
 
 # Golden test files are compared byte-for-byte; keep them LF everywhere.
 compiler/tests/** text eol=lf
+
+# --- GitHub language detection (Linguist) ----------------------------------
+# Strata isn't a registered GitHub language, so present its sources as C (the closest
+# family) for syntax highlighting and the repo language bar. `.dmm`/`.hmm` are the D--
+# compiler sources (also C-family); the override also avoids being mis-detected as
+# BYOND DreamMaker, which claims `.dmm`.
+*.strata linguist-language=C
+*.str    linguist-language=C
+*.dmm    linguist-language=C
+*.hmm    linguist-language=C
+
+# Keep the language bar meaningful: don't count golden fixtures as source.
+compiler/tests/** linguist-detectable=false
