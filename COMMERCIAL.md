@@ -15,10 +15,11 @@ obligation. The commercial license lifts the copyleft requirement on the compile
 
 ## Pricing
 
-- **Introductory price: $100 USD.**
-- Pricing may change, and may move to **tiered or usage-based ("dynamic") pricing** as the
-  project matures (for example, by team size or product revenue). The terms you buy under
-  are fixed at purchase.
+- **Introductory price: $100 USD** — this buys you the right to keep your modified-compiler
+  source **private** (no GPL disclosure).
+- Pricing may change and may become **dynamic**, scaling with the size of your project or
+  company (for example by team size or revenue), as the project matures. The terms you buy
+  under are fixed at the time of purchase.
 
 ## How to buy
 
