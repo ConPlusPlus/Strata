@@ -36,7 +36,9 @@ Early but real — programs **compile and run today** (compiler at v0.9.0):
 - ✅ arena/region memory, structs, functions, control flow
 - ✅ first-class math: `vec2/3/4`, `mat4`, quaternions, swizzles
 - ✅ strings, and **C interop** (`import` a header, `link` a library, call C directly)
-- ✅ **a raylib window written in Strata** ([`compiler/examples/window.strata`](compiler/examples/window.strata)) builds to a single native binary
+- ✅ **games written in Strata** — a raylib window ([`window.strata`](compiler/examples/window.strata))
+  and an **arrow-key-driven sprite** ([`sprite.strata`](compiler/examples/sprite.strata), movement
+  computed with Strata's own `vec2` math) build to single native binaries
 - ⏳ next: a small prelude (input/time), C struct/enum binding, then SoA arrays and hot-reload
 
 The compiler is called **`stratac`** and is itself written in D-- (a self-hosting

@@ -1,0 +1,34 @@
+// sprite.strata - move a circle with the arrow keys (milestone 3).
+// Position and movement use Strata's first-class vec2 math; raylib just draws it.
+// no GC, single native binary.  build/run:  stratac run sprite.strata
+import <raylib.h>
+link "raylib"
+link "opengl32"
+link "gdi32"
+link "winmm"
+
+InitWindow(800, 450, "Strata - move the circle (arrow keys)")
+SetTargetFPS(60)
+
+var pos = vec2(400, 225)          // first-class vector
+float speed = 260.0
+
+while !WindowShouldClose() {
+    float dt = GetFrameTime()
+
+    var dir = vec2(0, 0)
+    if IsKeyDown(KEY_RIGHT) { dir = dir + vec2(1, 0) }
+    if IsKeyDown(KEY_LEFT)  { dir = dir + vec2(-1, 0) }
+    if IsKeyDown(KEY_DOWN)  { dir = dir + vec2(0, 1) }
+    if IsKeyDown(KEY_UP)    { dir = dir + vec2(0, -1) }
+
+    pos = pos + dir * speed * dt   // vector add + scalar scale, in Strata
+
+    BeginDrawing()
+    ClearBackground(RAYWHITE)
+    DrawCircle(pos.x, pos.y, 20.0, MAROON)
+    DrawText("move with the arrow keys", 10, 10, 20, DARKGRAY)
+    EndDrawing()
+}
+
+CloseWindow()
