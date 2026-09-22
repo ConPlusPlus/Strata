@@ -1,0 +1,21 @@
+// arrays.strata - dynamic arrays: literals, push, len, index, and iteration.
+var nums = [10, 20, 30]
+nums.push(40)
+nums.push(50)
+print(nums.len)          // 5
+
+var total = 0
+for n in nums {
+    total = total + n
+}
+print(total)             // 150
+
+print(nums[2])           // 30
+
+// build one up from empty
+int[dynamic] squares
+for i in 0..5 {
+    squares.push(i * i)
+}
+print(squares.len)       // 5
+print(squares[4])        // 16

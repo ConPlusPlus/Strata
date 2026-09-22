@@ -44,6 +44,7 @@ str ast_type_str(TypeNode* t) {
         case TyNamed:      return t.name;
         case TyArray:      return ast_type_str(t.elem) + "[]";
         case TyFixedArray: return ast_type_str(t.elem) + "[" + t.size + "]";
+        case TyDynArray:   return ast_type_str(t.elem) + "[dynamic]";
         case TyPointer:    return ast_type_str(t.elem) + "*";
     }
     return "?";

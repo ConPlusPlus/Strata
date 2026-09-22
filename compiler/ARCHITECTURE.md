@@ -205,6 +205,12 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
    to a single native `.exe` (raylib installed via msys2). It's a GUI demo, so it's built (not
    golden-run) in CI. *Next: a prelude (input/time helpers), C struct/enum binding for engine
    types, then map Strata `vec2` ⇄ raylib `Vector2`.*
+9. ✅ **Dynamic arrays (`T[dynamic]`).** Array literals `[a, b, c]`, `.push(v)`, `.len`,
+   indexing (incl. lvalue: `xs[i].field = ...`), and `for x in xs` iteration. Type-erased
+   `Array` runtime (`lib/sarr.h`); the checker tracks the element type. Works for structs,
+   so **entity lists** work (see `examples/balls.strata` — a `Ball[dynamic]` with vec2
+   physics + raylib). Golden-tested (`run/arrays`). *Toward self-hosting: still need a
+   `switch`/`match`. Next: prelude, engine-type binding, or SoA (M4).*
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

@@ -18,7 +18,7 @@
 
 // ---- checker types -----------------------------------------------------
 
-enum TCat { TcInt, TcFloat, TcBool, TcChar, TcStr, TcVoid, TcStruct, TcArray, TcPointer, TcVec, TcMat, TcQuat, TcUnknown }
+enum TCat { TcInt, TcFloat, TcBool, TcChar, TcStr, TcVoid, TcStruct, TcArray, TcPointer, TcVec, TcMat, TcQuat, TcDynArray, TcUnknown }
 
 struct Type {
     TCat  cat;
@@ -28,6 +28,7 @@ struct Type {
 
 Type* ty(TCat c, str n)  { return new Type{ c, n, null }; }
 Type* ty_arr(Type* e)    { return new Type{ TcArray, "array", e }; }
+Type* ty_dynarr(Type* e) { return new Type{ TcDynArray, "array", e }; }
 Type* ty_ptr(Type* e)    { return new Type{ TcPointer, "pointer", e }; }
 
 bool t_is_numeric(Type* t) { return t.cat == TcInt || t.cat == TcFloat; }
@@ -48,6 +49,7 @@ str t_str(Type* t) {
         case TcMat:     return t.name;
         case TcQuat:    return t.name;
         case TcArray:   if (t.elem != null) { return t_str(t.elem) + "[]"; } return "?[]";
+        case TcDynArray: if (t.elem != null) { return t_str(t.elem) + "[dynamic]"; } return "?[dynamic]";
         case TcPointer: if (t.elem != null) { return t_str(t.elem) + "*"; } return "?*";
         default:        return "?";
     }
@@ -69,8 +71,9 @@ TypeNode* type_to_node(Type* t) {
         case TcMat:     return named_node(t.name);
         case TcQuat:    return named_node(t.name);
         case TcStruct:  return named_node(t.name);
-        case TcPointer: { TypeNode* n = new_type(TyPointer, 0, 0); n.elem = type_to_node(t.elem); return n; }
-        case TcArray:   { TypeNode* n = new_type(TyArray, 0, 0);   n.elem = type_to_node(t.elem); return n; }
+        case TcPointer:  { TypeNode* n = new_type(TyPointer, 0, 0);  n.elem = type_to_node(t.elem); return n; }
+        case TcArray:    { TypeNode* n = new_type(TyArray, 0, 0);    n.elem = type_to_node(t.elem); return n; }
+        case TcDynArray: { TypeNode* n = new_type(TyDynArray, 0, 0); n.elem = type_to_node(t.elem); return n; }
         default:        return null;   // unknown -> leave codegen's __auto_type fallback
     }
     return null;
@@ -168,6 +171,7 @@ int vec_swizzle_size(str vname, str field) {
 
 Type* ck_type(Checker* c, TypeNode* t) {
     if (t == null) { return ty(TcVoid, "void"); }
+    if (t.kind == TyDynArray) { return ty_dynarr(ck_type(c, t.elem)); }
     if (t.kind == TyArray || t.kind == TyFixedArray) { return ty_arr(ck_type(c, t.elem)); }
     if (t.kind == TyPointer) { return ty_ptr(ck_type(c, t.elem)); }
     Type* p = ck_prim(t.name);
@@ -192,6 +196,10 @@ bool ck_assignable(Type* target, Type* value) {
         case TcStruct: return value.cat == TcStruct && value.name == target.name;
         case TcArray:
             if (value.cat != TcArray) { return false; }
+            if (value.elem != null && value.elem.cat == TcUnknown) { return true; }
+            return target.elem != null && value.elem != null && ck_assignable(target.elem, value.elem);
+        case TcDynArray:
+            if (value.cat != TcDynArray) { return false; }
             if (value.elem != null && value.elem.cat == TcUnknown) { return true; }
             return target.elem != null && value.elem != null && ck_assignable(target.elem, value.elem);
         case TcPointer:
@@ -396,7 +404,7 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                     ck_error(c, e.line, e.col, "vector " + ot.name + " has no component/swizzle '" + e.field + "'");
                     return ty(TcUnknown, "?");
                 }
-                if (ot.cat == TcStr || ot.cat == TcArray) {
+                if (ot.cat == TcStr || ot.cat == TcArray || ot.cat == TcDynArray) {
                     if (e.field == "len") { return ty(TcInt, "int"); }
                     ck_error(c, e.line, e.col, t_str(ot) + " has no field '" + e.field + "' (did you mean 'len'?)");
                     return ty(TcUnknown, "?");
@@ -421,7 +429,8 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 Type* it = ck_expr(c, e.b);
                 if (!t_is_integer(it) && !t_is_unknown(it)) { ck_error(c, e.line, e.col, "index must be an integer, got " + t_str(it)); }
                 if (ot.cat == TcStr) { return ty(TcChar, "char"); }
-                if (ot.cat == TcArray)   { if (ot.elem != null) { return ot.elem; } return ty(TcUnknown, "?"); }
+                if (ot.cat == TcArray)    { if (ot.elem != null) { return ot.elem; } return ty(TcUnknown, "?"); }
+                if (ot.cat == TcDynArray) { if (ot.elem != null) { return ot.elem; } return ty(TcUnknown, "?"); }
                 if (ot.cat == TcPointer) { if (ot.elem != null) { return ot.elem; } return ty(TcUnknown, "?"); }
                 if (!t_is_unknown(ot)) { ck_error(c, e.line, e.col, "cannot index a value of type " + t_str(ot)); }
                 return ty(TcUnknown, "?");
@@ -429,7 +438,7 @@ Type* ck_expr_i(Checker* c, Expr* e) {
 
         case ExArrayLit:
             {
-                if (e.items.len == 0) { return ty_arr(ty(TcUnknown, "?")); }
+                if (e.items.len == 0) { return ty_dynarr(ty(TcUnknown, "?")); }
                 Type* first = ck_expr(c, e.items[0]);
                 for (int i = 1; i < e.items.len; i++) {
                     Type* et = ck_expr(c, e.items[i]);
@@ -437,7 +446,7 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                         ck_error(c, e.items[i].line, e.items[i].col, "array element " + int_to_str(i + 1) + " has type " + t_str(et) + ", expected " + t_str(first));
                     }
                 }
-                return ty_arr(first);
+                return ty_dynarr(first);
             }
 
         case ExStructLit:
@@ -488,6 +497,21 @@ Type* ck_call(Checker* c, Expr* e) {
             }
             arg.rtype = type_to_node(elem);   // codegen reads this for sizeof(T)
             return ty_ptr(elem);
+        }
+        // dynamic array append: `xs.push(v)`
+        if (callee.field == "push") {
+            Type* recv = ck_expr(c, callee.a);
+            if (recv.cat == TcDynArray) {
+                if (e.items.len != 1) { ck_error(c, e.line, e.col, "push takes exactly one argument"); }
+                else {
+                    Type* at = ck_expr(c, e.items[0]);
+                    if (recv.elem != null && !ck_assignable(recv.elem, at)) { ck_error(c, e.items[0].line, e.items[0].col, "push expects " + t_str(recv.elem) + ", got " + t_str(at)); }
+                }
+            } else {
+                if (!t_is_unknown(recv)) { ck_error(c, e.line, e.col, "push is only valid on a dynamic array, got " + t_str(recv)); }
+                for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
+            }
+            return ty(TcVoid, "void");
         }
         // other method-style calls: not resolved yet (UFCS/methods are backlog).
         ck_expr(c, callee.a);
@@ -713,18 +737,28 @@ void ck_stmt(Checker* c, Stmt* s) {
             }
         case StForIn:
             {
-                // v1: the iterable must be an integer range `lo..hi`; the loop var is int.
+                // for-in over an integer range `lo..hi` (loop var int), or over an array
+                // (loop var = element type).
+                Type* elemT = ty(TcInt, "int");
                 if (s.iter != null && s.iter.kind == ExBinary && s.iter.text == "..") {
                     Type* lo = ck_expr(c, s.iter.a);
                     Type* hi = ck_expr(c, s.iter.b);
                     if (!t_is_integer(lo) && !t_is_unknown(lo)) { ck_error(c, s.iter.line, s.iter.col, "range start must be an integer, got " + t_str(lo)); }
                     if (!t_is_integer(hi) && !t_is_unknown(hi)) { ck_error(c, s.iter.line, s.iter.col, "range end must be an integer, got " + t_str(hi)); }
+                } else if (s.iter != null) {
+                    Type* it = ck_expr(c, s.iter);
+                    if (it.cat == TcDynArray || it.cat == TcArray) {
+                        if (it.elem != null) { elemT = it.elem; } else { elemT = ty(TcUnknown, "?"); }
+                    } else if (!t_is_unknown(it)) {
+                        ck_error(c, s.line, s.col, "for-in needs an integer range or an array, got " + t_str(it));
+                    } else {
+                        elemT = ty(TcUnknown, "?");
+                    }
                 } else {
-                    ck_error(c, s.line, s.col, "for-in currently supports only an integer range 'lo..hi'");
-                    if (s.iter != null) { ck_expr(c, s.iter); }
+                    ck_error(c, s.line, s.col, "for-in needs an iterable");
                 }
                 ck_push(c);
-                ck_declare(c, s.name, ty(TcInt, "int"), false, s.line, s.col);
+                ck_declare(c, s.name, elemT, false, s.line, s.col);
                 ck_block(c, s.body);
                 ck_pop(c);
             }

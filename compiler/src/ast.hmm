@@ -14,7 +14,7 @@
 
 // ---- types -------------------------------------------------------------
 
-enum TypeKind { TyNamed, TyArray, TyFixedArray, TyPointer }
+enum TypeKind { TyNamed, TyArray, TyFixedArray, TyPointer, TyDynArray }
 
 struct TypeNode {
     TypeKind  kind;

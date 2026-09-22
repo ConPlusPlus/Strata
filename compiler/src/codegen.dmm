@@ -58,6 +58,7 @@ str ty_to_c(TypeNode* t) {
         case TyPointer:    return ty_to_c(t.elem) + "*";
         case TyArray:      return ty_to_c(t.elem) + "*";   // minimal: decay to pointer
         case TyFixedArray: return ty_to_c(t.elem) + "*";
+        case TyDynArray:   return "Array";                 // the type-erased dynamic array
     }
     return "void";
 }
@@ -70,6 +71,8 @@ str  cg_vec_name_rt(TypeNode* t) { if (cg_is_vec_rt(t)) { return t.name; } retur
 bool cg_is_mat_rt(TypeNode* t)  { if (t == null) { return false; } return t.kind == TyNamed && t.name == "mat4"; }
 bool cg_is_quat_rt(TypeNode* t) { if (t == null) { return false; } return t.kind == TyNamed && t.name == "quat"; }
 bool cg_is_str_rt(TypeNode* t)  { if (t == null) { return false; } return t.kind == TyNamed && t.name == "string"; }
+bool cg_is_dynarr_rt(TypeNode* t) { if (t == null) { return false; } return t.kind == TyDynArray; }
+str  cg_dynarr_elem(TypeNode* t)  { if (cg_is_dynarr_rt(t) && t.elem != null) { return ty_to_c(t.elem); } return "char"; }
 
 // ---- expressions -------------------------------------------------------
 
@@ -82,6 +85,14 @@ str gen_call(Codegen* cg, Expr* e) {
         str recv  = gen_expr(cg, e.a.a);
         str tname = cname(e.items[0].text);
         return "(" + tname + "*)arena_alloc(&" + recv + ", sizeof(" + tname + "))";
+    }
+
+    // dynamic array push: xs.push(v) -> ({ ELEM _e = v; arr_push(&(xs), &_e); })
+    if (e.a.kind == ExField && e.a.field == "push" && e.items.len == 1 && cg_is_dynarr_rt(e.a.a.rtype)) {
+        str elemc = cg_dynarr_elem(e.a.a.rtype);
+        str recv  = gen_expr(cg, e.a.a);
+        str val   = gen_expr(cg, e.items[0]);
+        return "({ " + elemc + " _e = " + val + "; arr_push(&(" + recv + "), &_e); })";
     }
 
     // `print(x)` - temporary built-in until the real prelude lands: %s for a string
@@ -195,7 +206,24 @@ str gen_expr(Codegen* cg, Expr* e) {
                 if (e.a.rtype != null && e.a.rtype.kind == TyPointer) { op = "->"; }
                 return gen_expr(cg, e.a) + op + e.field;
             }
-        case ExIndex: return gen_expr(cg, e.a) + "[" + gen_expr(cg, e.b) + "]";
+        case ExIndex:
+            {
+                if (cg_is_dynarr_rt(e.a.rtype)) {
+                    str elemc = cg_dynarr_elem(e.a.rtype);
+                    return "((" + elemc + "*)(" + gen_expr(cg, e.a) + ").data)[" + gen_expr(cg, e.b) + "]";
+                }
+                return gen_expr(cg, e.a) + "[" + gen_expr(cg, e.b) + "]";
+            }
+        case ExArrayLit:
+            {
+                str elemc = "int64_t";
+                if (e.rtype != null && e.rtype.kind == TyDynArray && e.rtype.elem != null) { elemc = ty_to_c(e.rtype.elem); }
+                str s = "({ Array _a = arr_make(sizeof(" + elemc + "));";
+                for (int i = 0; i < e.items.len; i++) {
+                    s = s + " { " + elemc + " _e = " + gen_expr(cg, e.items[i]) + "; arr_push(&_a, &_e); }";
+                }
+                return s + " _a; })";
+            }
         case ExStructLit:
             {
                 str s = "(" + cname(e.type_name) + "){";
@@ -230,6 +258,9 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                 if (s.is_const) { head = "const "; }
                 if (s.init != null) {
                     cg.out = cg.out + cg_indent(ind) + head + ct + " " + s.name + " = " + gen_expr(cg, s.init) + ";\n";
+                } else if (s.type != null && s.type.kind == TyDynArray) {
+                    // an uninitialized dynamic array starts empty (arena/heap not yet allocated)
+                    cg.out = cg.out + cg_indent(ind) + "Array " + s.name + " = arr_make(sizeof(" + ty_to_c(s.type.elem) + "));\n";
                 } else {
                     cg.out = cg.out + cg_indent(ind) + head + ct + " " + s.name + ";\n";
                 }
@@ -279,9 +310,20 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                 cg.out = cg.out + cg_indent(ind) + "for (int64_t " + s.name + " = " + lo + "; "
                        + s.name + " < " + hi + "; " + s.name + "++) ";
                 gen_braced(cg, ind, s.body); cg.out = cg.out + "\n";
+            } else if (cg_is_dynarr_rt(s.iter.rtype)) {
+                str elemc = cg_dynarr_elem(s.iter.rtype);
+                str arrx = gen_expr(cg, s.iter);
+                cg.out = cg.out + cg_indent(ind) + "{ Array _arr = " + arrx + ";\n";
+                cg.out = cg.out + cg_indent(ind + 1) + "for (int64_t _i = 0; _i < _arr.len; _i++) {\n";
+                cg.out = cg.out + cg_indent(ind + 2) + elemc + " " + s.name + " = ((" + elemc + "*)_arr.data)[_i];\n";
+                if (s.body != null && s.body.kind == StBlock) {
+                    for (int i = 0; i < s.body.stmts.len; i++) { gen_stmt(cg, ind + 2, s.body.stmts[i]); }
+                }
+                cg.out = cg.out + cg_indent(ind + 1) + "}\n";
+                cg.out = cg.out + cg_indent(ind) + "}\n";
             } else {
                 cg.had_error = true;
-                cg.out = cg.out + cg_indent(ind) + "/* unsupported for-in iterable (needs runtime) */\n";
+                cg.out = cg.out + cg_indent(ind) + "/* unsupported for-in iterable */\n";
             }
         case StRegion:
             {
@@ -322,6 +364,7 @@ str generate(Codegen* cg, Program prog) {
     cg.out = cg.out + "#include <arena.h>\n";
     cg.out = cg.out + "#include <smath.h>\n";
     cg.out = cg.out + "#include <sstr.h>\n";
+    cg.out = cg.out + "#include <sarr.h>\n";
 
     // imported C headers (interop)
     for (int i = 0; i < prog.decls.len; i++) {

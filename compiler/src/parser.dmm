@@ -67,7 +67,10 @@ TypeNode* parse_type(Parser* p) {
         if (p_check(p, TkLBracket)) {
             p_advance(p);
             TypeNode* arr = new_type(TyArray, t.line, t.col);
-            if (p_check(p, TkInt)) {
+            if (p_check(p, TkIdent) && p_peek(p).text == "dynamic") {
+                p_advance(p);
+                arr.kind = TyDynArray;
+            } else if (p_check(p, TkInt)) {
                 arr.kind = TyFixedArray;
                 arr.size = p_advance(p).text;
             }
@@ -95,6 +98,7 @@ int skip_type_at(Parser* p, int i) {
         else {
             i += 1;
             if (p.toks[i].kind == TkInt) { i += 1; }
+            else if (p.toks[i].kind == TkIdent && p.toks[i].text == "dynamic") { i += 1; }
             if (p.toks[i].kind != TkRBracket) { return 0 - 1; }
             i += 1;
         }

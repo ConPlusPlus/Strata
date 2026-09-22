@@ -1,0 +1,39 @@
+// balls.strata - many bouncing balls (milestone 3 + dynamic arrays).
+// a Ball[dynamic] of entities, vec2 physics per ball, drawn with raylib. no GC.
+import <raylib.h>
+link "raylib"
+link "opengl32"
+link "gdi32"
+link "winmm"
+
+struct Ball { vec2 pos; vec2 vel }
+
+InitWindow(800, 450, "Strata - bouncing balls")
+SetTargetFPS(60)
+
+Ball[dynamic] balls
+for i in 0..60 {
+    Ball b
+    b.pos = vec2(GetRandomValue(40, 760), GetRandomValue(40, 410))
+    b.vel = vec2(GetRandomValue(-200, 200), GetRandomValue(-200, 200))
+    balls.push(b)
+}
+
+while !WindowShouldClose() {
+    float dt = GetFrameTime()
+    for i in 0..balls.len {
+        balls[i].pos = balls[i].pos + balls[i].vel * dt
+        if balls[i].pos.x < 10  { balls[i].vel.x = 0 - balls[i].vel.x }
+        if balls[i].pos.x > 790 { balls[i].vel.x = 0 - balls[i].vel.x }
+        if balls[i].pos.y < 10  { balls[i].vel.y = 0 - balls[i].vel.y }
+        if balls[i].pos.y > 440 { balls[i].vel.y = 0 - balls[i].vel.y }
+    }
+    BeginDrawing()
+    ClearBackground(RAYWHITE)
+    for b in balls {
+        DrawCircle(b.pos.x, b.pos.y, 8.0, MAROON)
+    }
+    DrawText("bouncing balls, written in Strata", 10, 10, 20, DARKGRAY)
+    EndDrawing()
+}
+CloseWindow()
