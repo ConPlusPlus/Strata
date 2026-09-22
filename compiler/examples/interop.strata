@@ -1,0 +1,6 @@
+// interop.strata - calling C directly via `import`.
+import <stdio.h>
+import <stdlib.h>
+
+puts("hello from C's puts")
+print(abs(0 - 42))                  // 42

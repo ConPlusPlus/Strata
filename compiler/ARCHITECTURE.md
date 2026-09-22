@@ -195,7 +195,12 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
    `normalize`, `mat4_translate/scale/rotate/perspective/look_at`, `quat_axis_angle/
    rotate/to_mat4/normalize`). Operators lower to `smath.h` calls via the checker's
    `rtype`. The flagship `hello.strata` runs end-to-end. Golden-tested.
-   *Next: the `string` type + prelude (input/time), then milestone 3 (raylib demo).*
+7. ✅ **Strings + C interop.** `string` = C `const char*`; concat (`+`), `.len`, `==`/`!=`
+   via `lib/sstr.h`. **`import "h.h"` / `import <h.h>`** emits `#include` and enables calling
+   external C functions directly (checker treats unknown calls as external C once a header is
+   imported). Golden-tested (`run/strings`, `run/interop` calling libc `puts`/`abs`).
+   *Next: milestone 3 (raylib demo) — needs raylib installed + link flags in the build; plus
+   a prelude (input/time) and C constant/struct binding for engine types.*
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

@@ -120,6 +120,26 @@ bool looks_like_func(Parser* p) {
 
 // ---- declarations ------------------------------------------------------
 
+// `import "header.h"` or `import <header.h>` - a C header to #include (interop).
+Decl* import_decl(Parser* p) {
+    Token kw = p_expect(p, TkKwImport);
+    Decl* d = new_decl(DcInclude, kw.line, kw.col);
+    if (p_check(p, TkString)) {
+        d.path = p_advance(p).text;
+        d.is_system = false;
+    } else if (p_check(p, TkLt)) {
+        p_advance(p);
+        str path = "";
+        while (!p_check(p, TkGt) && !p_at_end(p)) { path = path + p_advance(p).text; }
+        p_expect(p, TkGt);
+        d.path = path;
+        d.is_system = true;
+    } else {
+        p.had_error = true;
+    }
+    return d;
+}
+
 Decl* enum_decl(Parser* p) {
     Token kw = p_expect(p, TkKwEnum);
     Decl* ed = new_decl(DcEnum, kw.line, kw.col);
@@ -181,7 +201,8 @@ Program parse_program(Parser* p) {
     Stmt*[] main  = [];
     skip_newlines(p);
     while (!p_at_end(p) && !p.had_error) {
-        if (p_check(p, TkKwStruct))     { decls.push(struct_decl(p)); }
+        if (p_check(p, TkKwImport))     { decls.push(import_decl(p)); }
+        else if (p_check(p, TkKwStruct)) { decls.push(struct_decl(p)); }
         else if (p_check(p, TkKwEnum))  { decls.push(enum_decl(p)); }
         else if (looks_like_func(p))    { decls.push(func_decl(p)); }
         else {

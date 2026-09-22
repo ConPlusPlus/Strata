@@ -88,6 +88,7 @@ struct EnumMember{ str member; str enum_name; }
 struct Checker {
     str          file;
     bool         had_error;
+    bool         has_foreign;   // did the program `import` a C header? (enables external calls)
     StructInfo[] structs;
     FuncInfo[]   funcs;
     str[]        enums;
@@ -621,8 +622,8 @@ Type* ck_call(Checker* c, Expr* e) {
             return c.funcs[fi].ret;
         }
 
-        // constructor-style call `vec3(...)`, or an unknown name: check args, yield unknown
-        ck_error(c, e.line, e.col, "call to undeclared function '" + name + "'");
+        // unknown name: treat as an external C function if a header was imported; else error.
+        if (!c.has_foreign) { ck_error(c, e.line, e.col, "call to undeclared function '" + name + "'"); }
         for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
         return ty(TcUnknown, "?");
     }
@@ -751,6 +752,8 @@ void ck_func(Checker* c, Decl* f) {
 // ---- program -----------------------------------------------------------
 
 bool ck_check(Checker* c, Program prog) {
+    // pass 0: note whether any C header is imported (enables external C calls)
+    for (int i = 0; i < prog.decls.len; i++) { if (prog.decls[i].kind == DcInclude) { c.has_foreign = true; } }
     // pass 1a: enums + members
     for (int i = 0; i < prog.decls.len; i++) {
         Decl* d = prog.decls[i];
@@ -806,5 +809,5 @@ Checker* new_checker(str file) {
     FuncInfo[]   fs = [];
     str[]        es = [];
     EnumMember[] ems = [];
-    return new Checker{ file, false, ss, fs, es, ems, null, ty(TcVoid, "void") };
+    return new Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void") };
 }

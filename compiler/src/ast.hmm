@@ -108,7 +108,7 @@ Stmt* new_stmt(StmtKind k, int line, int col) {
 
 // ---- declarations ------------------------------------------------------
 
-enum DeclKind { DcFunc, DcStruct, DcEnum }
+enum DeclKind { DcFunc, DcStruct, DcEnum, DcInclude }
 
 struct Param    { str name; TypeNode* type; }
 struct FieldDef { str name; TypeNode* type; }
@@ -126,6 +126,9 @@ struct Decl {
     FieldDef[] fields;
     // DcEnum
     str[]      members;
+    // DcInclude (C interop: `import "header.h"` / `import <header.h>`)
+    str        path;
+    bool       is_system;
 }
 
 Decl* new_decl(DeclKind k, int line, int col) {
@@ -137,7 +140,8 @@ Decl* new_decl(DeclKind k, int line, int col) {
         "",                      // name
         params, null, null,      // params, ret, body
         fields,                  // fields
-        members                  // members
+        members,                 // members
+        "", false                // path, is_system
     };
 }
 

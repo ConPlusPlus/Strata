@@ -69,6 +69,7 @@ bool cg_is_vec_rt(TypeNode* t) { if (t == null) { return false; } if (t.kind != 
 str  cg_vec_name_rt(TypeNode* t) { if (cg_is_vec_rt(t)) { return t.name; } return ""; }
 bool cg_is_mat_rt(TypeNode* t)  { if (t == null) { return false; } return t.kind == TyNamed && t.name == "mat4"; }
 bool cg_is_quat_rt(TypeNode* t) { if (t == null) { return false; } return t.kind == TyNamed && t.name == "quat"; }
+bool cg_is_str_rt(TypeNode* t)  { if (t == null) { return false; } return t.kind == TyNamed && t.name == "string"; }
 
 // ---- expressions -------------------------------------------------------
 
@@ -88,6 +89,7 @@ str gen_call(Codegen* cg, Expr* e) {
     if (e.a.kind == ExName && e.a.text == "print" && e.items.len == 1) {
         Expr* arg = e.items[0];
         if (arg.kind == ExStringLit) { return "printf(\"%s\\n\", " + gen_expr(cg, arg) + ")"; }
+        if (cg_is_str_rt(arg.rtype)) { return "printf(\"%s\\n\", " + gen_expr(cg, arg) + ")"; }
         if (arg.rtype != null && arg.rtype.kind == TyNamed && arg.rtype.name == "float") {
             return "printf(\"%g\\n\", (double)(" + gen_expr(cg, arg) + "))";
         }
@@ -162,11 +164,22 @@ str gen_expr(Codegen* cg, Expr* e) {
                     cg.had_error = true;
                     return "0";
                 }
+                if (cg_is_str_rt(e.a.rtype) || cg_is_str_rt(e.b.rtype)) {
+                    str sa = gen_expr(cg, e.a);
+                    str sb = gen_expr(cg, e.b);
+                    if (e.text == "+")  { return "str_concat(" + sa + ", " + sb + ")"; }
+                    if (e.text == "==") { return "str_eq(" + sa + ", " + sb + ")"; }
+                    if (e.text == "!=") { return "(!str_eq(" + sa + ", " + sb + "))"; }
+                    cg.had_error = true;
+                    return "0";
+                }
                 return "(" + gen_expr(cg, e.a) + " " + e.text + " " + gen_expr(cg, e.b) + ")";
             }
         case ExCall:  return gen_call(cg, e);
         case ExField:
             {
+                // string length: s.len -> str_len(s)
+                if (cg_is_str_rt(e.a.rtype) && e.field == "len") { return "str_len(" + gen_expr(cg, e.a) + ")"; }
                 // multi-component swizzle on a vector: v.xy -> (vec2){(v).x, (v).y}
                 if (cg_is_vec_rt(e.a.rtype) && e.field.len > 1) {
                     str base = gen_expr(cg, e.a);
@@ -307,7 +320,18 @@ str generate(Codegen* cg, Program prog) {
     cg.out = cg.out + "#include <stdbool.h>\n";
     cg.out = cg.out + "#include <stdio.h>\n";
     cg.out = cg.out + "#include <arena.h>\n";
-    cg.out = cg.out + "#include <smath.h>\n\n";
+    cg.out = cg.out + "#include <smath.h>\n";
+    cg.out = cg.out + "#include <sstr.h>\n";
+
+    // imported C headers (interop)
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcInclude) {
+            if (d.is_system) { cg.out = cg.out + "#include <" + d.path + ">\n"; }
+            else             { cg.out = cg.out + "#include \"" + d.path + "\"\n"; }
+        }
+    }
+    cg.out = cg.out + "\n";
 
     // struct tags forward-declared first (so fields can reference any struct), then defined
     for (int i = 0; i < prog.decls.len; i++) {

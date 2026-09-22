@@ -1,0 +1,8 @@
+// strings.strata - string concatenation, length, and comparison.
+var greeting = "hello" + ", " + "strata"
+print(greeting)                     // hello, strata
+print(greeting.len)                 // 13
+
+if greeting == "hello, strata" {
+    print("match")
+}
