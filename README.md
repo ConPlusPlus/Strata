@@ -79,6 +79,16 @@ The Strata **runtime** carries a linking exception ([`LICENSE-RUNTIME.md`](LICEN
 so **programs you build with Strata are entirely yours** — license and sell them under any
 terms you like, open or closed. The GPL covers the compiler, never what you make with it.
 
+**Commercial license:** to modify the *compiler* and keep your changes private (no GPL
+disclosure), a commercial license is available from **$100** — see [`COMMERCIAL.md`](COMMERCIAL.md).
+Games built with Strata never need this.
+
 **Strata™** — the name and branding are trademarks of the project author (common-law).
 The code is GPL; the *name* is not — forks must use a different name. See
 [`TRADEMARK.md`](TRADEMARK.md).
+
+**Contributing:** by contributing you agree to the [CLA](CLA.md) — you keep your copyright,
+and grant the project the right to use and relicense your contribution. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Copyright © 2026 Connor Rutberg. Strata is free software under GPL-3.0; see [`LICENSE`](LICENSE).

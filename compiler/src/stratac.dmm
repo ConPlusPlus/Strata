@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
 // src/stratac.dmm - the Strata compiler driver (front-end #1: the CLI, `stratac`).
 // Thin: CLI + orchestration only (ARCHITECTURE.md rule #4). Pulls in the shared
 // renderer (dump.dmm), which pulls in the whole core (incl. codegen).
@@ -11,7 +14,7 @@
 #include "dump.dmm"    // print_tokens / print_program (+ the core via core.dmm)
 #include <stdlib.h>    // system()  (C header, passed through to the generated C)
 
-str stratac_version() { return "0.6.0 (structs, arena, first-class vectors)"; }
+str stratac_version() { return "0.7.0 (vectors, matrices, quaternions, swizzles)"; }
 
 // ---- paths -------------------------------------------------------------
 

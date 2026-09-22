@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
 // src/token.hmm - token kinds + the Token record, shared across the Strata compiler
 // modules (lexer.dmm produces them, parser.dmm will consume them). Written in D--
 // (the implementation language). Included textually: `#include "token.hmm"`.

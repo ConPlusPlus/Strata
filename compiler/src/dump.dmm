@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
 // src/dump.dmm - human-readable rendering of the core's data (tokens + AST).
 //
 // A shared FRONT-END utility, not part of the compiler core: it consumes core data and

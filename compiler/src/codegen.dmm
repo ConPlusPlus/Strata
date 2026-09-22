@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
 // src/codegen.dmm - the Strata code generator, written in D-- (a MODULE, no main). CORE.
 //
 // Milestone 1, step 3: the thin vertical slice. Turns the AST into plain C for the
@@ -64,6 +67,8 @@ bool cg_is_vec_name(str n) { return n == "vec2" || n == "vec3" || n == "vec4"; }
 int  cg_vec_size(str n) { if (n == "vec2") { return 2; } if (n == "vec3") { return 3; } if (n == "vec4") { return 4; } return 0; }
 bool cg_is_vec_rt(TypeNode* t) { if (t == null) { return false; } if (t.kind != TyNamed) { return false; } return cg_is_vec_name(t.name); }
 str  cg_vec_name_rt(TypeNode* t) { if (cg_is_vec_rt(t)) { return t.name; } return ""; }
+bool cg_is_mat_rt(TypeNode* t)  { if (t == null) { return false; } return t.kind == TyNamed && t.name == "mat4"; }
+bool cg_is_quat_rt(TypeNode* t) { if (t == null) { return false; } return t.kind == TyNamed && t.name == "quat"; }
 
 // ---- expressions -------------------------------------------------------
 
@@ -131,6 +136,15 @@ str gen_expr(Codegen* cg, Expr* e) {
         case ExBinary:
             {
                 if (e.text == "..") { cg.had_error = true; return "0"; }   // ranges only in for..in
+                if (cg_is_mat_rt(e.a.rtype) || cg_is_quat_rt(e.a.rtype) || cg_is_mat_rt(e.b.rtype) || cg_is_quat_rt(e.b.rtype)) {
+                    str ma = gen_expr(cg, e.a);
+                    str mb = gen_expr(cg, e.b);
+                    if (cg_is_mat_rt(e.a.rtype) && cg_is_mat_rt(e.b.rtype)) { return "mat4_mul(" + ma + ", " + mb + ")"; }
+                    if (cg_is_mat_rt(e.a.rtype) && cg_is_vec_rt(e.b.rtype)) { return "mat4_mul_vec4(" + ma + ", " + mb + ")"; }
+                    if (cg_is_quat_rt(e.a.rtype) && cg_is_quat_rt(e.b.rtype)) { return "quat_mul(" + ma + ", " + mb + ")"; }
+                    cg.had_error = true;
+                    return "0";
+                }
                 bool av = cg_is_vec_rt(e.a.rtype);
                 bool bv = cg_is_vec_rt(e.b.rtype);
                 if (av || bv) {
@@ -153,6 +167,16 @@ str gen_expr(Codegen* cg, Expr* e) {
         case ExCall:  return gen_call(cg, e);
         case ExField:
             {
+                // multi-component swizzle on a vector: v.xy -> (vec2){(v).x, (v).y}
+                if (cg_is_vec_rt(e.a.rtype) && e.field.len > 1) {
+                    str base = gen_expr(cg, e.a);
+                    str vt = "vec2";
+                    if (e.field.len == 3) { vt = "vec3"; }
+                    if (e.field.len == 4) { vt = "vec4"; }
+                    str s = "(" + vt + "){";
+                    for (int i = 0; i < e.field.len; i++) { if (i > 0) { s = s + ", "; } s = s + "(" + base + ")." + substr(e.field, i, 1); }
+                    return s + "}";
+                }
                 // `.` auto-derefs: if the receiver is a pointer (per the checker's rtype), use `->`.
                 str op = ".";
                 if (e.a.rtype != null && e.a.rtype.kind == TyPointer) { op = "->"; }

@@ -1,0 +1,15 @@
+// matrix.strata - mat4, quaternions, and swizzles (milestone 2 math).
+
+var m = mat4_translate(vec3(10, 20, 30))
+var p = m * vec4(0, 0, 0, 1)          // translate the origin point
+print(p.x)                             // 10
+print(p.y)                             // 20
+
+var q = quat_axis_angle(vec3(0, 0, 1), 1.5707963)   // 90 degrees about Z
+var v = quat_rotate(q, vec3(1, 0, 0))               // -> ~ (0, 1, 0)
+print(v.y)                             // ~1
+
+var a = vec4(1, 2, 3, 4)
+var s = a.xy                           // swizzle -> vec2(1, 2)
+print(s.x)                             // 1
+print(a.zw.y)                          // 4

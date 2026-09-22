@@ -1,3 +1,4 @@
+/* Copyright © 2026 Connor Rutberg */
 /* arena.h - Strata's arena/region allocator: the zero-GC memory runtime.
  *
  * The rule the language exposes: everything in a region dies together; you never free

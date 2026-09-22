@@ -189,11 +189,13 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
 5. ✅ `lib/arena.h` runtime + structs + `arena()` / `.new(T)` / `region { }` lowering.
    *Done — chunked arena (pointers stay stable), struct codegen, `.`→`->` auto-deref via
    the checker's `rtype` annotation on expressions; golden-tested (`run/arena`).*
-6. ✅ **Milestone 2 (started): first-class vectors.** `vec2/3/4` types, constructors,
-   component-wise `+`/`-`/`*`, scalar scale, `.x/.y/.z/.w`, `dot`/`cross`/`length`/
-   `normalize`; operators lower to `smath.h` calls via the checker's `rtype`. The flagship
-   `hello.strata` (structs + vec3 + arena, no GC) runs end-to-end. Golden-tested.
-   *Next: `mat4`/`quat`, swizzles, the `string` type + prelude.*
+6. ✅ **Milestone 2: first-class math.** `vec2/3/4`, `mat4`, `quat`; constructors,
+   component-wise `+`/`-`/`*`, scalar scale, `.x/.y/.z/.w` **and swizzles** (`v.xy`, chained),
+   `mat4 * vec4`, `mat4 * mat4`, `quat * quat`, and builtins (`dot`/`cross`/`length`/
+   `normalize`, `mat4_translate/scale/rotate/perspective/look_at`, `quat_axis_angle/
+   rotate/to_mat4/normalize`). Operators lower to `smath.h` calls via the checker's
+   `rtype`. The flagship `hello.strata` runs end-to-end. Golden-tested.
+   *Next: the `string` type + prelude (input/time), then milestone 3 (raylib demo).*
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

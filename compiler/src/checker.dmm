@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
 // src/checker.dmm - the Strata type checker (a.k.a. sema), written in D-- (a MODULE,
 // no main). CORE. Milestone 1, step 4.
 //
@@ -15,7 +18,7 @@
 
 // ---- checker types -----------------------------------------------------
 
-enum TCat { TcInt, TcFloat, TcBool, TcChar, TcStr, TcVoid, TcStruct, TcArray, TcPointer, TcVec, TcUnknown }
+enum TCat { TcInt, TcFloat, TcBool, TcChar, TcStr, TcVoid, TcStruct, TcArray, TcPointer, TcVec, TcMat, TcQuat, TcUnknown }
 
 struct Type {
     TCat  cat;
@@ -42,6 +45,8 @@ str t_str(Type* t) {
         case TcStr:     return "string";
         case TcVoid:    return "void";
         case TcVec:     return t.name;
+        case TcMat:     return t.name;
+        case TcQuat:    return t.name;
         case TcArray:   if (t.elem != null) { return t_str(t.elem) + "[]"; } return "?[]";
         case TcPointer: if (t.elem != null) { return t_str(t.elem) + "*"; } return "?*";
         default:        return "?";
@@ -61,6 +66,8 @@ TypeNode* type_to_node(Type* t) {
         case TcChar:    return named_node("char");
         case TcStr:     return named_node("string");
         case TcVec:     return named_node(t.name);
+        case TcMat:     return named_node(t.name);
+        case TcQuat:    return named_node(t.name);
         case TcStruct:  return named_node(t.name);
         case TcPointer: { TypeNode* n = new_type(TyPointer, 0, 0); n.elem = type_to_node(t.elem); return n; }
         case TcArray:   { TypeNode* n = new_type(TyArray, 0, 0);   n.elem = type_to_node(t.elem); return n; }
@@ -129,17 +136,33 @@ Type* ck_prim(str n) {
     if (n == "string") { return ty(TcStr, n); }
     if (n == "void")   { return ty(TcVoid, n); }
     if (n == "vec2" || n == "vec3" || n == "vec4") { return ty(TcVec, n); }
+    if (n == "mat4") { return ty(TcMat, n); }
+    if (n == "quat") { return ty(TcQuat, n); }
     return null;
 }
 
-// Does a vector type have a single component with this name? (swizzles come later)
-bool vec_has_component(str vname, str field) {
-    if (field.len != 1) { return false; }
-    char c = field[0];
-    if (vname == "vec2") { return c == 'x' || c == 'y'; }
-    if (vname == "vec3") { return c == 'x' || c == 'y' || c == 'z'; }
-    if (vname == "vec4") { return c == 'x' || c == 'y' || c == 'z' || c == 'w'; }
+// How many components does a vector type have?
+int vec_dim(str vname) {
+    if (vname == "vec2") { return 2; }
+    if (vname == "vec3") { return 3; }
+    if (vname == "vec4") { return 4; }
+    return 0;
+}
+// Is char c a valid component (x/y/z/w) within a vector of `dim` components?
+bool vec_comp_ok(char c, int dim) {
+    if (c == 'x' || c == 'y') { return true; }
+    if (c == 'z') { return dim >= 3; }
+    if (c == 'w') { return dim >= 4; }
     return false;
+}
+// A swizzle `field` on a vector `vname` selects 1-4 components. Returns how many it
+// selects (1 => a float, 2..4 => a vecN), or 0 if invalid.
+int vec_swizzle_size(str vname, str field) {
+    int dim = vec_dim(vname);
+    if (dim == 0) { return 0; }
+    if (field.len < 1 || field.len > 4) { return 0; }
+    for (int i = 0; i < field.len; i++) { if (!vec_comp_ok(field[i], dim)) { return 0; } }
+    return field.len;
 }
 
 Type* ck_type(Checker* c, TypeNode* t) {
@@ -163,6 +186,8 @@ bool ck_assignable(Type* target, Type* value) {
         case TcChar:   return value.cat == TcChar;
         case TcStr:    return value.cat == TcStr;
         case TcVec:    return value.cat == TcVec && value.name == target.name;
+        case TcMat:    return value.cat == TcMat;
+        case TcQuat:   return value.cat == TcQuat;
         case TcStruct: return value.cat == TcStruct && value.name == target.name;
         case TcArray:
             if (value.cat != TcArray) { return false; }
@@ -286,6 +311,17 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 }
                 Type* lt = ck_expr(c, e.a);
                 Type* rt = ck_expr(c, e.b);
+                if (lt.cat == TcMat || rt.cat == TcMat || lt.cat == TcQuat || rt.cat == TcQuat) {
+                    if (op == "*") {
+                        if (lt.cat == TcMat && rt.cat == TcMat) { return lt; }                               // mat4 * mat4
+                        if (lt.cat == TcMat && rt.cat == TcVec && rt.name == "vec4") { return rt; }           // mat4 * vec4 -> vec4
+                        if (lt.cat == TcQuat && rt.cat == TcQuat) { return lt; }                              // quat * quat
+                        ck_error(c, e.line, e.col, "'*' is not defined between " + t_str(lt) + " and " + t_str(rt));
+                        return ty(TcUnknown, "?");
+                    }
+                    ck_error(c, e.line, e.col, "only '*' is defined for matrices/quaternions");
+                    return ty(TcUnknown, "?");
+                }
                 if (lt.cat == TcVec || rt.cat == TcVec) {
                     if (op == "+" || op == "-") {
                         if (lt.cat == TcVec && rt.cat == TcVec && lt.name == rt.name) { return lt; }
@@ -349,8 +385,12 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 Type* ot = ck_expr(c, e.a);
                 if (t_is_unknown(ot)) { return ty(TcUnknown, "?"); }
                 if (ot.cat == TcVec) {
-                    if (vec_has_component(ot.name, e.field)) { return ty(TcFloat, "float"); }
-                    ck_error(c, e.line, e.col, "vector " + ot.name + " has no component '" + e.field + "'");
+                    int sw = vec_swizzle_size(ot.name, e.field);
+                    if (sw == 1) { return ty(TcFloat, "float"); }
+                    if (sw == 2) { return ty(TcVec, "vec2"); }
+                    if (sw == 3) { return ty(TcVec, "vec3"); }
+                    if (sw == 4) { return ty(TcVec, "vec4"); }
+                    ck_error(c, e.line, e.col, "vector " + ot.name + " has no component/swizzle '" + e.field + "'");
                     return ty(TcUnknown, "?");
                 }
                 if (ot.cat == TcStr || ot.cat == TcArray) {
@@ -508,6 +548,59 @@ Type* ck_call(Checker* c, Expr* e) {
                 Type* a = ck_expr(c, e.items[0]);
                 Type* b = ck_expr(c, e.items[1]);
                 if ((a.name != "vec3" || b.name != "vec3") && !t_is_unknown(a) && !t_is_unknown(b)) { ck_error(c, e.line, e.col, "cross expects two vec3"); }
+            }
+            return ty(TcVec, "vec3");
+        }
+
+        // matrix / quaternion builtins - names match smath.h, so codegen just calls them.
+        if (name == "mat4_identity" || name == "quat_identity") {
+            if (e.items.len != 0) { ck_error(c, e.line, e.col, name + "() takes no arguments"); }
+            if (name == "quat_identity") { return ty(TcQuat, "quat"); }
+            return ty(TcMat, "mat4");
+        }
+        if (name == "mat4_translate" || name == "mat4_scale") {
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, name + "(v) takes 1 argument"); }
+            else { Type* a = ck_expr(c, e.items[0]); if (a.name != "vec3" && !t_is_unknown(a)) { ck_error(c, e.items[0].line, e.items[0].col, name + " expects a vec3"); } }
+            return ty(TcMat, "mat4");
+        }
+        if (name == "mat4_rotate" || name == "quat_axis_angle") {
+            if (e.items.len != 2) { ck_error(c, e.line, e.col, name + "(axis, angle) takes 2 arguments"); }
+            else {
+                Type* a = ck_expr(c, e.items[0]);
+                Type* b = ck_expr(c, e.items[1]);
+                if (a.name != "vec3" && !t_is_unknown(a)) { ck_error(c, e.items[0].line, e.items[0].col, name + " axis must be a vec3"); }
+                if (!t_is_numeric(b) && !t_is_unknown(b)) { ck_error(c, e.items[1].line, e.items[1].col, name + " angle must be numeric"); }
+            }
+            if (name == "quat_axis_angle") { return ty(TcQuat, "quat"); }
+            return ty(TcMat, "mat4");
+        }
+        if (name == "mat4_perspective") {
+            if (e.items.len != 4) { ck_error(c, e.line, e.col, "mat4_perspective(fovy, aspect, near, far) takes 4 arguments"); }
+            for (int i = 0; i < e.items.len; i++) { Type* a = ck_expr(c, e.items[i]); if (!t_is_numeric(a) && !t_is_unknown(a)) { ck_error(c, e.items[i].line, e.items[i].col, "mat4_perspective arguments must be numeric"); } }
+            return ty(TcMat, "mat4");
+        }
+        if (name == "mat4_look_at") {
+            if (e.items.len != 3) { ck_error(c, e.line, e.col, "mat4_look_at(eye, center, up) takes 3 arguments"); }
+            for (int i = 0; i < e.items.len; i++) { Type* a = ck_expr(c, e.items[i]); if (a.name != "vec3" && !t_is_unknown(a)) { ck_error(c, e.items[i].line, e.items[i].col, "mat4_look_at arguments must be vec3"); } }
+            return ty(TcMat, "mat4");
+        }
+        if (name == "quat_normalize") {
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, "quat_normalize(q) takes 1 argument"); }
+            else { Type* a = ck_expr(c, e.items[0]); if (a.cat != TcQuat && !t_is_unknown(a)) { ck_error(c, e.items[0].line, e.items[0].col, "quat_normalize expects a quat"); } }
+            return ty(TcQuat, "quat");
+        }
+        if (name == "quat_to_mat4") {
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, "quat_to_mat4(q) takes 1 argument"); }
+            else { Type* a = ck_expr(c, e.items[0]); if (a.cat != TcQuat && !t_is_unknown(a)) { ck_error(c, e.items[0].line, e.items[0].col, "quat_to_mat4 expects a quat"); } }
+            return ty(TcMat, "mat4");
+        }
+        if (name == "quat_rotate") {
+            if (e.items.len != 2) { ck_error(c, e.line, e.col, "quat_rotate(q, v) takes 2 arguments"); }
+            else {
+                Type* a = ck_expr(c, e.items[0]);
+                Type* b = ck_expr(c, e.items[1]);
+                if (a.cat != TcQuat && !t_is_unknown(a)) { ck_error(c, e.items[0].line, e.items[0].col, "quat_rotate expects a quat"); }
+                if (b.name != "vec3" && !t_is_unknown(b)) { ck_error(c, e.items[1].line, e.items[1].col, "quat_rotate expects a vec3"); }
             }
             return ty(TcVec, "vec3");
         }
