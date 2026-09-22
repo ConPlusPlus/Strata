@@ -1,4 +1,4 @@
-# Strata
+# Strata™
 
 A statically-typed, compiled programming language **for games and real-time software**.
 
@@ -79,4 +79,6 @@ The Strata **runtime** carries a linking exception ([`LICENSE-RUNTIME.md`](LICEN
 so **programs you build with Strata are entirely yours** — license and sell them under any
 terms you like, open or closed. The GPL covers the compiler, never what you make with it.
 
-*("Strata" name/trademark policy is still to be determined.)*
+**Strata™** — the name and branding are trademarks of the project author (common-law).
+The code is GPL; the *name* is not — forks must use a different name. See
+[`TRADEMARK.md`](TRADEMARK.md).
