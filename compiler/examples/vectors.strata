@@ -1,0 +1,8 @@
+// vectors.strata - first-class vector math (milestone 2).
+var a = vec3(3, 4, 0)
+print(length(a))            // 5
+
+var b = vec3(1, 0, 0)
+var c = a + b * 2.0         // (5, 4, 0)
+print(c.x)                  // 5
+print(dot(a, b))            // 3

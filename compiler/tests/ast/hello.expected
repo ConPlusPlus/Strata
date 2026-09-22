@@ -17,6 +17,12 @@ Func vec3 update(Entity* e, float dt)
       Field .pos
         Name e
 Main
+  ExprStmt
+    Call
+      callee:
+        Name print
+      args:
+        String "hello, strata"
   Var var world
     =
       Call
@@ -66,4 +72,9 @@ Main
       callee:
         Name print
       args:
-        String "hello, strata"
+        Call
+          callee:
+            Name length
+          args:
+            Field .pos
+              Name e

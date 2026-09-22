@@ -59,6 +59,12 @@ str ty_to_c(TypeNode* t) {
     return "void";
 }
 
+// ---- vector helpers (read the checker's rtype annotations) --------------
+bool cg_is_vec_name(str n) { return n == "vec2" || n == "vec3" || n == "vec4"; }
+int  cg_vec_size(str n) { if (n == "vec2") { return 2; } if (n == "vec3") { return 3; } if (n == "vec4") { return 4; } return 0; }
+bool cg_is_vec_rt(TypeNode* t) { if (t == null) { return false; } if (t.kind != TyNamed) { return false; } return cg_is_vec_name(t.name); }
+str  cg_vec_name_rt(TypeNode* t) { if (cg_is_vec_rt(t)) { return t.name; } return ""; }
+
 // ---- expressions -------------------------------------------------------
 
 str gen_call(Codegen* cg, Expr* e) {
@@ -77,7 +83,34 @@ str gen_call(Codegen* cg, Expr* e) {
     if (e.a.kind == ExName && e.a.text == "print" && e.items.len == 1) {
         Expr* arg = e.items[0];
         if (arg.kind == ExStringLit) { return "printf(\"%s\\n\", " + gen_expr(cg, arg) + ")"; }
+        if (arg.rtype != null && arg.rtype.kind == TyNamed && arg.rtype.name == "float") {
+            return "printf(\"%g\\n\", (double)(" + gen_expr(cg, arg) + "))";
+        }
         return "printf(\"%lld\\n\", (long long)(" + gen_expr(cg, arg) + "))";
+    }
+
+    // vector constructors + math builtins
+    if (e.a.kind == ExName) {
+        str nm = e.a.text;
+        if (cg_is_vec_name(nm)) {
+            int n = cg_vec_size(nm);
+            str s = "(" + nm + "){";
+            if (e.items.len == 1 && n > 1) {
+                str v = gen_expr(cg, e.items[0]);
+                for (int i = 0; i < n; i++) { if (i > 0) { s = s + ", "; } s = s + v; }
+            } else {
+                for (int i = 0; i < e.items.len; i++) { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
+            }
+            return s + "}";
+        }
+        if (nm == "dot" && e.items.len == 2) {
+            str vn = cg_vec_name_rt(e.items[0].rtype);
+            if (vn.len == 0) { vn = cg_vec_name_rt(e.items[1].rtype); }
+            return vn + "_dot(" + gen_expr(cg, e.items[0]) + ", " + gen_expr(cg, e.items[1]) + ")";
+        }
+        if (nm == "cross" && e.items.len == 2) { return "vec3_cross(" + gen_expr(cg, e.items[0]) + ", " + gen_expr(cg, e.items[1]) + ")"; }
+        if (nm == "length" && e.items.len == 1) { return cg_vec_name_rt(e.items[0].rtype) + "_length(" + gen_expr(cg, e.items[0]) + ")"; }
+        if (nm == "normalize" && e.items.len == 1) { return cg_vec_name_rt(e.items[0].rtype) + "_normalize(" + gen_expr(cg, e.items[0]) + ")"; }
     }
 
     str s = gen_expr(cg, e.a) + "(";
@@ -96,8 +129,27 @@ str gen_expr(Codegen* cg, Expr* e) {
         case ExName:      return e.text;
         case ExUnary:     return "(" + e.text + gen_expr(cg, e.a) + ")";
         case ExBinary:
-            if (e.text == "..") { cg.had_error = true; return "0"; }   // ranges only in for..in
-            return "(" + gen_expr(cg, e.a) + " " + e.text + " " + gen_expr(cg, e.b) + ")";
+            {
+                if (e.text == "..") { cg.had_error = true; return "0"; }   // ranges only in for..in
+                bool av = cg_is_vec_rt(e.a.rtype);
+                bool bv = cg_is_vec_rt(e.b.rtype);
+                if (av || bv) {
+                    str vn = cg_vec_name_rt(e.a.rtype);
+                    if (vn.len == 0) { vn = cg_vec_name_rt(e.b.rtype); }
+                    str va = gen_expr(cg, e.a);
+                    str vb = gen_expr(cg, e.b);
+                    if (e.text == "+") { return vn + "_add(" + va + ", " + vb + ")"; }
+                    if (e.text == "-") { return vn + "_sub(" + va + ", " + vb + ")"; }
+                    if (e.text == "*") {
+                        if (av && bv) { return vn + "_mul(" + va + ", " + vb + ")"; }
+                        if (av)       { return vn + "_scale(" + va + ", " + vb + ")"; }
+                        return vn + "_scale(" + vb + ", " + va + ")";
+                    }
+                    cg.had_error = true;
+                    return "0";
+                }
+                return "(" + gen_expr(cg, e.a) + " " + e.text + " " + gen_expr(cg, e.b) + ")";
+            }
         case ExCall:  return gen_call(cg, e);
         case ExField:
             {
@@ -151,7 +203,25 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
         case StExprStmt:
             cg.out = cg.out + cg_indent(ind) + gen_expr(cg, s.expr) + ";\n";
         case StAssign:
-            cg.out = cg.out + cg_indent(ind) + gen_expr(cg, s.target) + " " + s.op + " " + gen_expr(cg, s.value) + ";\n";
+            {
+                // compound assignment on a vector lowers to `target = vecN_op(target, value)`
+                if (s.op != "=" && cg_is_vec_rt(s.target.rtype)) {
+                    str vn  = cg_vec_name_rt(s.target.rtype);
+                    str tgt = gen_expr(cg, s.target);
+                    str val = gen_expr(cg, s.value);
+                    str rhs = "0";
+                    if (s.op == "+=")      { rhs = vn + "_add(" + tgt + ", " + val + ")"; }
+                    else if (s.op == "-=") { rhs = vn + "_sub(" + tgt + ", " + val + ")"; }
+                    else if (s.op == "*=") {
+                        if (cg_is_vec_rt(s.value.rtype)) { rhs = vn + "_mul(" + tgt + ", " + val + ")"; }
+                        else                             { rhs = vn + "_scale(" + tgt + ", " + val + ")"; }
+                    }
+                    else { cg.had_error = true; }
+                    cg.out = cg.out + cg_indent(ind) + tgt + " = " + rhs + ";\n";
+                } else {
+                    cg.out = cg.out + cg_indent(ind) + gen_expr(cg, s.target) + " " + s.op + " " + gen_expr(cg, s.value) + ";\n";
+                }
+            }
         case StIf:
             cg.out = cg.out + cg_indent(ind) + "if (" + gen_expr(cg, s.cond) + ") ";
             gen_braced(cg, ind, s.then_block);
@@ -212,7 +282,8 @@ str generate(Codegen* cg, Program prog) {
     cg.out = cg.out + "#include <stdint.h>\n";
     cg.out = cg.out + "#include <stdbool.h>\n";
     cg.out = cg.out + "#include <stdio.h>\n";
-    cg.out = cg.out + "#include <arena.h>\n\n";
+    cg.out = cg.out + "#include <arena.h>\n";
+    cg.out = cg.out + "#include <smath.h>\n\n";
 
     // struct tags forward-declared first (so fields can reference any struct), then defined
     for (int i = 0; i < prog.decls.len; i++) {

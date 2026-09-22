@@ -189,7 +189,11 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
 5. ✅ `lib/arena.h` runtime + structs + `arena()` / `.new(T)` / `region { }` lowering.
    *Done — chunked arena (pointers stay stable), struct codegen, `.`→`->` auto-deref via
    the checker's `rtype` annotation on expressions; golden-tested (`run/arena`).*
-6. Next: the `string` type + prelude, then math types (milestone 2: vec/mat/quat).
+6. ✅ **Milestone 2 (started): first-class vectors.** `vec2/3/4` types, constructors,
+   component-wise `+`/`-`/`*`, scalar scale, `.x/.y/.z/.w`, `dot`/`cross`/`length`/
+   `normalize`; operators lower to `smath.h` calls via the checker's `rtype`. The flagship
+   `hello.strata` (structs + vec3 + arena, no GC) runs end-to-end. Golden-tested.
+   *Next: `mat4`/`quat`, swizzles, the `string` type + prelude.*
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

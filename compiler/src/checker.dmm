@@ -15,7 +15,7 @@
 
 // ---- checker types -----------------------------------------------------
 
-enum TCat { TcInt, TcFloat, TcBool, TcChar, TcStr, TcVoid, TcStruct, TcArray, TcPointer, TcUnknown }
+enum TCat { TcInt, TcFloat, TcBool, TcChar, TcStr, TcVoid, TcStruct, TcArray, TcPointer, TcVec, TcUnknown }
 
 struct Type {
     TCat  cat;
@@ -41,6 +41,7 @@ str t_str(Type* t) {
         case TcChar:    return "char";
         case TcStr:     return "string";
         case TcVoid:    return "void";
+        case TcVec:     return t.name;
         case TcArray:   if (t.elem != null) { return t_str(t.elem) + "[]"; } return "?[]";
         case TcPointer: if (t.elem != null) { return t_str(t.elem) + "*"; } return "?*";
         default:        return "?";
@@ -59,6 +60,7 @@ TypeNode* type_to_node(Type* t) {
         case TcBool:    return named_node("bool");
         case TcChar:    return named_node("char");
         case TcStr:     return named_node("string");
+        case TcVec:     return named_node(t.name);
         case TcStruct:  return named_node(t.name);
         case TcPointer: { TypeNode* n = new_type(TyPointer, 0, 0); n.elem = type_to_node(t.elem); return n; }
         case TcArray:   { TypeNode* n = new_type(TyArray, 0, 0);   n.elem = type_to_node(t.elem); return n; }
@@ -126,7 +128,18 @@ Type* ck_prim(str n) {
     if (n == "char")   { return ty(TcChar, n); }
     if (n == "string") { return ty(TcStr, n); }
     if (n == "void")   { return ty(TcVoid, n); }
+    if (n == "vec2" || n == "vec3" || n == "vec4") { return ty(TcVec, n); }
     return null;
+}
+
+// Does a vector type have a single component with this name? (swizzles come later)
+bool vec_has_component(str vname, str field) {
+    if (field.len != 1) { return false; }
+    char c = field[0];
+    if (vname == "vec2") { return c == 'x' || c == 'y'; }
+    if (vname == "vec3") { return c == 'x' || c == 'y' || c == 'z'; }
+    if (vname == "vec4") { return c == 'x' || c == 'y' || c == 'z' || c == 'w'; }
+    return false;
 }
 
 Type* ck_type(Checker* c, TypeNode* t) {
@@ -149,6 +162,7 @@ bool ck_assignable(Type* target, Type* value) {
         case TcBool:   return value.cat == TcBool;
         case TcChar:   return value.cat == TcChar;
         case TcStr:    return value.cat == TcStr;
+        case TcVec:    return value.cat == TcVec && value.name == target.name;
         case TcStruct: return value.cat == TcStruct && value.name == target.name;
         case TcArray:
             if (value.cat != TcArray) { return false; }
@@ -272,6 +286,22 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 }
                 Type* lt = ck_expr(c, e.a);
                 Type* rt = ck_expr(c, e.b);
+                if (lt.cat == TcVec || rt.cat == TcVec) {
+                    if (op == "+" || op == "-") {
+                        if (lt.cat == TcVec && rt.cat == TcVec && lt.name == rt.name) { return lt; }
+                        ck_error(c, e.line, e.col, "'" + op + "' requires two vectors of the same size, got " + t_str(lt) + " and " + t_str(rt));
+                        return ty(TcUnknown, "?");
+                    }
+                    if (op == "*") {
+                        if (lt.cat == TcVec && rt.cat == TcVec && lt.name == rt.name) { return lt; }
+                        if (lt.cat == TcVec && t_is_numeric(rt)) { return lt; }
+                        if (rt.cat == TcVec && t_is_numeric(lt)) { return rt; }
+                        ck_error(c, e.line, e.col, "'*' on a vector needs a matching vector or a scalar, got " + t_str(lt) + " and " + t_str(rt));
+                        return ty(TcUnknown, "?");
+                    }
+                    ck_error(c, e.line, e.col, "'" + op + "' is not defined for vectors");
+                    return ty(TcUnknown, "?");
+                }
                 if (op == "&&" || op == "||") {
                     if ((lt.cat != TcBool && !t_is_unknown(lt)) || (rt.cat != TcBool && !t_is_unknown(rt))) {
                         ck_error(c, e.line, e.col, "'" + op + "' requires bool operands");
@@ -318,6 +348,11 @@ Type* ck_expr_i(Checker* c, Expr* e) {
             {
                 Type* ot = ck_expr(c, e.a);
                 if (t_is_unknown(ot)) { return ty(TcUnknown, "?"); }
+                if (ot.cat == TcVec) {
+                    if (vec_has_component(ot.name, e.field)) { return ty(TcFloat, "float"); }
+                    ck_error(c, e.line, e.col, "vector " + ot.name + " has no component '" + e.field + "'");
+                    return ty(TcUnknown, "?");
+                }
                 if (ot.cat == TcStr || ot.cat == TcArray) {
                     if (e.field == "len") { return ty(TcInt, "int"); }
                     ck_error(c, e.line, e.col, t_str(ot) + " has no field '" + e.field + "' (did you mean 'len'?)");
@@ -433,6 +468,50 @@ Type* ck_call(Checker* c, Expr* e) {
             return ty(TcVoid, "void");
         }
 
+        // vector constructors: vecN(components...) or vecN(scalar) to splat
+        if (name == "vec2" || name == "vec3" || name == "vec4") {
+            int n = 2;
+            if (name == "vec3") { n = 3; }
+            if (name == "vec4") { n = 4; }
+            if (e.items.len != n && e.items.len != 1) {
+                ck_error(c, e.line, e.col, name + "() takes " + int_to_str(n) + " components (or 1 to splat)");
+            }
+            for (int i = 0; i < e.items.len; i++) {
+                Type* at = ck_expr(c, e.items[i]);
+                if (!t_is_numeric(at) && !t_is_unknown(at)) { ck_error(c, e.items[i].line, e.items[i].col, name + " components must be numeric, got " + t_str(at)); }
+            }
+            return ty(TcVec, name);
+        }
+        // vector math builtins
+        if (name == "dot") {
+            if (e.items.len != 2) { ck_error(c, e.line, e.col, "dot(a, b) takes 2 arguments"); }
+            else {
+                Type* a = ck_expr(c, e.items[0]);
+                Type* b = ck_expr(c, e.items[1]);
+                if ((a.cat != TcVec || b.cat != TcVec || a.name != b.name) && !t_is_unknown(a) && !t_is_unknown(b)) { ck_error(c, e.line, e.col, "dot expects two vectors of the same size"); }
+            }
+            return ty(TcFloat, "float");
+        }
+        if (name == "length" || name == "normalize") {
+            Type* r = ty(TcFloat, "float");
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, name + "(v) takes 1 argument"); }
+            else {
+                Type* a = ck_expr(c, e.items[0]);
+                if (a.cat != TcVec && !t_is_unknown(a)) { ck_error(c, e.items[0].line, e.items[0].col, name + " expects a vector, got " + t_str(a)); }
+                if (name == "normalize") { r = a; }
+            }
+            return r;
+        }
+        if (name == "cross") {
+            if (e.items.len != 2) { ck_error(c, e.line, e.col, "cross(a, b) takes 2 arguments"); }
+            else {
+                Type* a = ck_expr(c, e.items[0]);
+                Type* b = ck_expr(c, e.items[1]);
+                if ((a.name != "vec3" || b.name != "vec3") && !t_is_unknown(a) && !t_is_unknown(b)) { ck_error(c, e.line, e.col, "cross expects two vec3"); }
+            }
+            return ty(TcVec, "vec3");
+        }
+
         int fi = ck_func_index(c, name);
         if (fi >= 0) {
             int np = c.funcs[fi].params.len;
@@ -509,8 +588,19 @@ void ck_stmt(Checker* c, Stmt* s) {
                 else if (lv.is_const) { ck_error(c, s.line, s.col, "cannot assign to a const variable"); }
                 Type* tt = ck_expr(c, s.target);
                 Type* vt = ck_expr(c, s.value);
-                if (s.op != "=" && !t_is_numeric(tt) && !t_is_unknown(tt)) { ck_error(c, s.line, s.col, "'" + s.op + "' requires a numeric operand, got " + t_str(tt)); }
-                if (!ck_assignable(tt, vt)) { ck_error(c, s.line, s.col, "cannot assign " + t_str(vt) + " to " + t_str(tt)); }
+                if (tt.cat == TcVec && s.op != "=") {
+                    // vector compound-assign: += / -= need a matching vector; *= a vector or scalar
+                    if (s.op == "+=" || s.op == "-=") {
+                        if (!(vt.cat == TcVec && vt.name == tt.name) && !t_is_unknown(vt)) { ck_error(c, s.line, s.col, "'" + s.op + "' on " + tt.name + " requires a " + tt.name); }
+                    } else if (s.op == "*=") {
+                        if (!((vt.cat == TcVec && vt.name == tt.name) || t_is_numeric(vt)) && !t_is_unknown(vt)) { ck_error(c, s.line, s.col, "'*=' on a vector requires a matching vector or a scalar"); }
+                    } else {
+                        ck_error(c, s.line, s.col, "'" + s.op + "' is not defined for vectors");
+                    }
+                } else {
+                    if (s.op != "=" && !t_is_numeric(tt) && !t_is_unknown(tt)) { ck_error(c, s.line, s.col, "'" + s.op + "' requires a numeric operand, got " + t_str(tt)); }
+                    if (!ck_assignable(tt, vt)) { ck_error(c, s.line, s.col, "cannot assign " + t_str(vt) + " to " + t_str(tt)); }
+                }
             }
         case StIf:
             {
