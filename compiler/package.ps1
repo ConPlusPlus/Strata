@@ -1,0 +1,43 @@
+# package.ps1 - build a distributable Strata toolchain archive for a GitHub Release.
+# Produces compiler\dist\strata-<version>-windows-x64.zip containing the compiler, the
+# runtime it needs, and the licenses - the layout install.ps1 expects (stratac finds its
+# lib/ next to the exe). A future installer can download and unzip this.
+#
+#   powershell -ExecutionPolicy Bypass -File compiler\package.ps1 -Version 0.10.0
+#   gh release upload v0.10.0 compiler\dist\strata-0.10.0-windows-x64.zip
+
+param([string]$Version = "dev")
+
+$ErrorActionPreference = 'Stop'
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path   # ...\compiler
+$repo = Split-Path -Parent $here
+$bin  = Join-Path $here 'bin'
+$lib  = Join-Path $here 'lib'
+$dist = Join-Path $here 'dist'
+
+# 1. build fresh binaries
+Write-Host "building ..." -ForegroundColor Cyan
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $here 'build.ps1') | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "build failed" }
+
+# 2. stage the toolchain (flat layout: exe at root, runtime in lib\)
+$stageRoot = Join-Path $env:TEMP "strata-pkg"
+if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
+$stage = Join-Path $stageRoot "strata"
+New-Item -ItemType Directory -Force -Path (Join-Path $stage 'lib') | Out-Null
+foreach ($f in 'stratac.exe','console.exe','libstrata.dll') { Copy-Item (Join-Path $bin $f) (Join-Path $stage $f) }
+Copy-Item (Join-Path $lib '*.h') (Join-Path $stage 'lib')
+foreach ($f in 'LICENSE','LICENSE-RUNTIME.md','README.md','CHANGELOG.md') {
+    if (Test-Path (Join-Path $repo $f)) { Copy-Item (Join-Path $repo $f) (Join-Path $stage $f) }
+}
+
+# 3. zip it
+New-Item -ItemType Directory -Force -Path $dist | Out-Null
+$zip = Join-Path $dist "strata-$Version-windows-x64.zip"
+if (Test-Path $zip) { Remove-Item $zip -Force }
+Compress-Archive -Path $stage -DestinationPath $zip
+
+Write-Host ""
+Write-Host "packaged: $zip" -ForegroundColor Green
+Write-Host "note: the compiler shells out to a C compiler (gcc) to build programs; a bundled"
+Write-Host "      tcc for zero-dependency 'stratac run' is planned."

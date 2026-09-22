@@ -14,6 +14,9 @@ compiler/examples/*.exe
 # build output directory (stratac.exe, console.exe, libstrata.dll, libstrata.c)
 compiler/bin/
 
+# packaged release archives (uploaded to GitHub Releases, not committed)
+compiler/dist/
+
 # generic native/build leftovers
 *.o
 *.obj
