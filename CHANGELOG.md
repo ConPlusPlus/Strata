@@ -6,7 +6,14 @@ may still change between minor versions. Each version has a matching `vX.Y.Z` gi
 GitHub Release.
 
 ## [Unreleased]
-- (in progress) `switch`/`match`.
+- nothing yet.
+
+## [0.11.0] - 2026-09-22
+### Added
+- **Enums** now compile to C enums (`enum State { Idle, Walk, Jump }`).
+- **`switch`** statements: `switch x { case A: ... case B, C: ... default: ... }`, with
+  **no fall-through** (each case breaks) and multi-value cases. Works on ints and enums.
+  This is the AST-dispatch pattern needed to eventually self-host the compiler in Strata.
 
 ## [0.10.0] - 2026-09-22
 ### Added
@@ -54,7 +61,8 @@ Built before the first tagged release:
 - The compiler (`stratac`), written in D--, split into a reusable core + front-ends
   (`stratac` CLI, `console`, `libstrata.dll`), with a byte-for-byte golden test suite.
 
-[Unreleased]: https://github.com/UseStrata/Strata/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/UseStrata/Strata/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/UseStrata/Strata/releases/tag/v0.11.0
 [0.10.0]: https://github.com/UseStrata/Strata/releases/tag/v0.10.0
 [0.9.0]: https://github.com/UseStrata/Strata/releases/tag/v0.9.0
 [0.8.0]: https://github.com/UseStrata/Strata/releases/tag/v0.8.0

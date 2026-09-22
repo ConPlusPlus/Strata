@@ -769,6 +769,23 @@ void ck_stmt(Checker* c, Stmt* s) {
                 ck_block(c, s.body);
                 ck_pop(c);
             }
+        case StSwitch:
+            {
+                Type* st = ck_expr(c, s.subject);
+                if (!t_is_integer(st) && st.cat != TcChar && !t_is_unknown(st)) {
+                    ck_error(c, s.line, s.col, "switch subject must be an integer, char, or enum, got " + t_str(st));
+                }
+                for (int i = 0; i < s.cases.len; i++) {
+                    SwitchCase sc = s.cases[i];
+                    for (int j = 0; j < sc.values.len; j++) {
+                        Type* vt = ck_expr(c, sc.values[j]);
+                        if (!t_is_integer(vt) && vt.cat != TcChar && !t_is_unknown(vt)) {
+                            ck_error(c, sc.values[j].line, sc.values[j].col, "switch case value must be an integer, char, or enum, got " + t_str(vt));
+                        }
+                    }
+                    ck_block(c, sc.body);
+                }
+            }
         default:
             {
             }

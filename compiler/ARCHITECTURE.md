@@ -209,8 +209,12 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
    indexing (incl. lvalue: `xs[i].field = ...`), and `for x in xs` iteration. Type-erased
    `Array` runtime (`lib/sarr.h`); the checker tracks the element type. Works for structs,
    so **entity lists** work (see `examples/balls.strata` — a `Ball[dynamic]` with vec2
-   physics + raylib). Golden-tested (`run/arrays`). *Toward self-hosting: still need a
-   `switch`/`match`. Next: prelude, engine-type binding, or SoA (M4).*
+   physics + raylib). Golden-tested (`run/arrays`).
+10. ✅ **Enums + `switch`.** Enums compile to C enums; `switch subject { case A: ...
+    case B, C: ... default: ... }` with **no fall-through** (a `break` per case) and
+    multi-value cases. Works on ints and enums — the AST-dispatch pattern a self-hosted
+    compiler needs. Golden-tested (`run/switch`). *With this, Strata has the core needed to
+    self-host. Next: a prelude, tagged unions, engine-type binding, or SoA (M4).*
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

@@ -330,6 +330,42 @@ Stmt* region_stmt(Parser* p) {
     return s;
 }
 
+Stmt* switch_stmt(Parser* p) {
+    Token kw = p_advance(p);
+    Stmt* s = new_stmt(StSwitch, kw.line, kw.col);
+    s.subject = header_expr(p);        // no_brace so the following `{` is the body
+    p_expect(p, TkLBrace);
+    skip_newlines(p);
+    while (!p_check(p, TkRBrace) && !p_at_end(p)) {
+        Expr*[] vals = [];
+        bool is_def = false;
+        Token ct = p_peek(p);
+        if (p_check(p, TkKwDefault)) {
+            p_advance(p);
+            is_def = true;
+        } else if (p_check(p, TkKwCase)) {
+            p_advance(p);
+            bool more = true;
+            while (more) { vals.push(expression(p)); more = p_match(p, TkComma); }
+        } else {
+            p.had_error = true;
+            return s;
+        }
+        p_expect(p, TkColon);
+        skip_newlines(p);
+        Stmt* body = new_stmt(StBlock, ct.line, ct.col);
+        while (!p_check(p, TkKwCase) && !p_check(p, TkKwDefault) && !p_check(p, TkRBrace) && !p_at_end(p)) {
+            int before = p.pos;
+            body.stmts.push(statement(p));
+            if (p.pos == before) { p.had_error = true; p_advance(p); }
+            skip_newlines(p);
+        }
+        s.cases.push(SwitchCase{ vals, body, is_def, ct.line, ct.col });
+    }
+    p_expect(p, TkRBrace);
+    return s;
+}
+
 Stmt* statement(Parser* p) {
     switch (p_peek(p).kind) {
         case TkKwReturn: return return_stmt(p);
@@ -337,6 +373,7 @@ Stmt* statement(Parser* p) {
         case TkKwWhile:  return while_stmt(p);
         case TkKwFor:    return for_stmt(p);
         case TkKwRegion: return region_stmt(p);
+        case TkKwSwitch: return switch_stmt(p);
         case TkLBrace:   return block(p);
         case TkKwVar, TkKwConst: return var_decl_core(p);
         default:

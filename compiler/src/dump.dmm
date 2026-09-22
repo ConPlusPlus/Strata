@@ -114,6 +114,15 @@ void pr_stmt(int ind, Stmt* s) {
         case StRegion:
             if (s.name.len > 0) { pr(ind, "Region " + s.name); } else { pr(ind, "Region"); }
             pr_stmt(ind + 1, s.body);
+        case StSwitch:
+            pr(ind, "Switch");
+            pr(ind + 1, "subject:"); pr_expr(ind + 2, s.subject);
+            for (int i = 0; i < s.cases.len; i++) {
+                SwitchCase c = s.cases[i];
+                if (c.is_default) { pr(ind + 1, "default:"); }
+                else { pr(ind + 1, "case:"); for (int j = 0; j < c.values.len; j++) { pr_expr(ind + 2, c.values[j]); } }
+                pr_stmt(ind + 2, c.body);
+            }
         default:
             pr(ind, "?stmt");
     }

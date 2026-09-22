@@ -325,6 +325,25 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                 cg.had_error = true;
                 cg.out = cg.out + cg_indent(ind) + "/* unsupported for-in iterable */\n";
             }
+        case StSwitch:
+            cg.out = cg.out + cg_indent(ind) + "switch (" + gen_expr(cg, s.subject) + ") {\n";
+            for (int i = 0; i < s.cases.len; i++) {
+                SwitchCase sc = s.cases[i];
+                if (sc.is_default) {
+                    cg.out = cg.out + cg_indent(ind + 1) + "default: {\n";
+                } else {
+                    for (int j = 0; j < sc.values.len; j++) {
+                        cg.out = cg.out + cg_indent(ind + 1) + "case " + gen_expr(cg, sc.values[j]) + ":\n";
+                    }
+                    cg.out = cg.out + cg_indent(ind + 1) + "{\n";
+                }
+                if (sc.body != null && sc.body.kind == StBlock) {
+                    for (int j = 0; j < sc.body.stmts.len; j++) { gen_stmt(cg, ind + 2, sc.body.stmts[j]); }
+                }
+                cg.out = cg.out + cg_indent(ind + 2) + "break;\n";
+                cg.out = cg.out + cg_indent(ind + 1) + "}\n";
+            }
+            cg.out = cg.out + cg_indent(ind) + "}\n";
         case StRegion:
             {
                 str rname = s.name;
@@ -375,6 +394,16 @@ str generate(Codegen* cg, Program prog) {
         }
     }
     cg.out = cg.out + "\n";
+
+    // enums -> C enums (members become C integer constants)
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcEnum) {
+            cg.out = cg.out + "typedef enum {";
+            for (int m = 0; m < d.members.len; m++) { if (m > 0) { cg.out = cg.out + ","; } cg.out = cg.out + " " + d.members[m]; }
+            cg.out = cg.out + " } " + d.name + ";\n";
+        }
+    }
 
     // struct tags forward-declared first (so fields can reference any struct), then defined
     for (int i = 0; i < prog.decls.len; i++) {

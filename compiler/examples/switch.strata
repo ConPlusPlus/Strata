@@ -1,0 +1,30 @@
+// switch.strata - enums + switch (game state machines; also how the compiler dispatches).
+enum State { Idle, Walk, Jump }
+
+string describe(State s) {
+    switch s {
+        case Idle: return "idle"
+        case Walk: return "walking"
+        case Jump: return "jumping"
+        default:   return "?"
+    }
+    return "?"
+}
+
+print(describe(Idle))
+print(describe(Walk))
+print(describe(Jump))
+
+// switch on an int, with multi-value cases
+int classify(int n) {
+    switch n {
+        case 0:       return 0
+        case 1, 2, 3: return 1
+        default:      return 2
+    }
+    return 0
+}
+
+print(classify(0))
+print(classify(2))
+print(classify(9))

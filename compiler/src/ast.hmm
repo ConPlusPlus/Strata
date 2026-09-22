@@ -60,7 +60,15 @@ Expr* new_expr(ExprKind k, int line, int col) {
 
 enum StmtKind {
     StBlock, StVar, StReturn, StExprStmt, StAssign,
-    StIf, StWhile, StForIn, StRegion
+    StIf, StWhile, StForIn, StRegion, StSwitch
+}
+
+struct SwitchCase {
+    Expr*[] values;      // case values; empty => `default`
+    Stmt*   body;        // a StBlock of the case's statements
+    bool    is_default;
+    int     line;
+    int     col;
 }
 
 struct Stmt {
@@ -89,10 +97,14 @@ struct Stmt {
     Stmt*      body;
     // StBlock
     Stmt*[]    stmts;
+    // StSwitch
+    Expr*        subject;
+    SwitchCase[] cases;
 }
 
 Stmt* new_stmt(StmtKind k, int line, int col) {
-    Stmt*[] stmts = [];
+    Stmt*[]      stmts = [];
+    SwitchCase[] cases = [];
     return new Stmt{
         k, line, col,
         false, "", null, null,   // is_const, name, type, init
@@ -102,7 +114,8 @@ Stmt* new_stmt(StmtKind k, int line, int col) {
         null,                     // iter
         null, null,               // then_block, else_branch
         null,                     // body
-        stmts                     // stmts
+        stmts,                    // stmts
+        null, cases               // subject, cases
     };
 }
 

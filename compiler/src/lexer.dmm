@@ -195,8 +195,11 @@ TokKind keyword_kind(str w) {
     if (w == "true")   { return TkKwTrue; }
     if (w == "false")  { return TkKwFalse; }
     if (w == "region") { return TkKwRegion; }
-    if (w == "import") { return TkKwImport; }
-    if (w == "link")   { return TkKwLink; }
+    if (w == "import")  { return TkKwImport; }
+    if (w == "link")    { return TkKwLink; }
+    if (w == "switch")  { return TkKwSwitch; }
+    if (w == "case")    { return TkKwCase; }
+    if (w == "default") { return TkKwDefault; }
     return TkIdent;
 }
 
@@ -331,6 +334,9 @@ str kind_name(TokKind k) {
         case TkKwRegion:  return "region";
         case TkKwImport:  return "import";
         case TkKwLink:    return "link";
+        case TkKwSwitch:  return "switch";
+        case TkKwCase:    return "case";
+        case TkKwDefault: return "default";
         case TkLParen:    return "(";
         case TkRParen:    return ")";
         case TkLBrace:    return "{";
