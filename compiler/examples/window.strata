@@ -1,0 +1,19 @@
+// window.strata - a raylib window, written in Strata (milestone 3).
+// no GC, single native binary. Build/run: stratac run window.strata
+import <raylib.h>
+link "raylib"
+link "opengl32"
+link "gdi32"
+link "winmm"
+
+InitWindow(800, 450, "Strata - hello from a game language")
+SetTargetFPS(60)
+
+while !WindowShouldClose() {
+    BeginDrawing()
+    ClearBackground(RAYWHITE)
+    DrawText("Hello from Strata!", 250, 200, 20, DARKGRAY)
+    EndDrawing()
+}
+
+CloseWindow()

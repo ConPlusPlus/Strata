@@ -273,7 +273,9 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 if (v.found) { return v.type; }
                 str en = ck_enum_member(c, e.text);
                 if (en != "") { return ty(TcInt, en); }
-                ck_error(c, e.line, e.col, "use of undeclared name '" + e.text + "'");
+                // unknown name: an external C symbol (e.g. a raylib constant) if a header
+                // was imported; otherwise a real error.
+                if (!c.has_foreign) { ck_error(c, e.line, e.col, "use of undeclared name '" + e.text + "'"); }
                 return ty(TcUnknown, "?");
             }
 

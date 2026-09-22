@@ -196,6 +196,7 @@ TokKind keyword_kind(str w) {
     if (w == "false")  { return TkKwFalse; }
     if (w == "region") { return TkKwRegion; }
     if (w == "import") { return TkKwImport; }
+    if (w == "link")   { return TkKwLink; }
     return TkIdent;
 }
 
@@ -329,6 +330,7 @@ str kind_name(TokKind k) {
         case TkKwFalse:   return "false";
         case TkKwRegion:  return "region";
         case TkKwImport:  return "import";
+        case TkKwLink:    return "link";
         case TkLParen:    return "(";
         case TkRParen:    return ")";
         case TkLBrace:    return "{";

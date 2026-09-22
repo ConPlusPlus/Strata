@@ -139,6 +139,8 @@ void pr_decl(Decl* d) {
             for (int i = 0; i < d.fields.len; i++) { pr(1, ast_type_str(d.fields[i].type) + " " + d.fields[i].name); }
         case DcInclude:
             if (d.is_system) { pr(0, "Import <" + d.path + ">"); } else { pr(0, "Import \"" + d.path + "\""); }
+        case DcLink:
+            pr(0, "Link \"" + d.path + "\"");
         default:
             pr(0, "?decl");
     }

@@ -199,8 +199,12 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
    via `lib/sstr.h`. **`import "h.h"` / `import <h.h>`** emits `#include` and enables calling
    external C functions directly (checker treats unknown calls as external C once a header is
    imported). Golden-tested (`run/strings`, `run/interop` calling libc `puts`/`abs`).
-   *Next: milestone 3 (raylib demo) — needs raylib installed + link flags in the build; plus
-   a prelude (input/time) and C constant/struct binding for engine types.*
+8. ✅ **Milestone 3: raylib window.** A `link "lib"` directive adds `-llib` to the build;
+   unknown *names* (e.g. `RAYWHITE`) resolve as external C symbols when a header is imported.
+   [`examples/window.strata`](examples/window.strata) — `import <raylib.h>` + `link` — builds
+   to a single native `.exe` (raylib installed via msys2). It's a GUI demo, so it's built (not
+   golden-run) in CI. *Next: a prelude (input/time helpers), C struct/enum binding for engine
+   types, then map Strata `vec2` ⇄ raylib `Vector2`.*
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

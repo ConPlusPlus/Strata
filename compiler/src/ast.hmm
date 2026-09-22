@@ -108,7 +108,7 @@ Stmt* new_stmt(StmtKind k, int line, int col) {
 
 // ---- declarations ------------------------------------------------------
 
-enum DeclKind { DcFunc, DcStruct, DcEnum, DcInclude }
+enum DeclKind { DcFunc, DcStruct, DcEnum, DcInclude, DcLink }
 
 struct Param    { str name; TypeNode* type; }
 struct FieldDef { str name; TypeNode* type; }

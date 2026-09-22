@@ -14,7 +14,7 @@
 #include "dump.dmm"    // print_tokens / print_program (+ the core via core.dmm)
 #include <stdlib.h>    // system()  (C header, passed through to the generated C)
 
-str stratac_version() { return "0.8.0 (strings + C interop)"; }
+str stratac_version() { return "0.9.0 (C library linking; raylib-ready)"; }
 
 // ---- paths -------------------------------------------------------------
 
@@ -109,13 +109,19 @@ bool build_exe(str path, str libdir, bool quiet) {
     str c = generate(&cg, prog);
     if (cg.had_error) { print("codegen: program uses features not supported yet"); return false; }
 
+    // link libraries requested by `link "..."` directives (e.g. raylib)
+    str links = "";
+    for (int i = 0; i < prog.decls.len; i++) {
+        if (prog.decls[i].kind == DcLink) { links = links + " -l" + prog.decls[i].path; }
+    }
+
     str stem = stem_of(path);
     str cpath = stem + ".c";
     str exepath = stem + ".exe";
     write_file(cpath, c);
 
-    // gnu11 for __auto_type; -I<libdir> for <arena.h>/<smath.h>; -lm for vector math.
-    str cmd = "gcc -std=gnu11 -O2 \"" + cpath + "\" -I\"" + libdir + "\" -o \"" + exepath + "\" -lm";
+    // gnu11 for __auto_type; -I<libdir> for <arena.h>/<smath.h>; link libs; -lm for math.
+    str cmd = "gcc -std=gnu11 -O2 \"" + cpath + "\" -I\"" + libdir + "\"" + links + " -o \"" + exepath + "\" -lm";
     int rc = system(cstr(cmd));
     if (rc != 0) { return false; }
     if (!quiet) { print("built " + exepath); }

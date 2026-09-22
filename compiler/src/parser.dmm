@@ -140,6 +140,14 @@ Decl* import_decl(Parser* p) {
     return d;
 }
 
+// `link "raylib"` - a C library to link (adds -lraylib to the build).
+Decl* link_decl(Parser* p) {
+    Token kw = p_expect(p, TkKwLink);
+    Decl* d = new_decl(DcLink, kw.line, kw.col);
+    d.path = p_expect(p, TkString).text;   // the library name (path field reused)
+    return d;
+}
+
 Decl* enum_decl(Parser* p) {
     Token kw = p_expect(p, TkKwEnum);
     Decl* ed = new_decl(DcEnum, kw.line, kw.col);
@@ -202,6 +210,7 @@ Program parse_program(Parser* p) {
     skip_newlines(p);
     while (!p_at_end(p) && !p.had_error) {
         if (p_check(p, TkKwImport))     { decls.push(import_decl(p)); }
+        else if (p_check(p, TkKwLink))  { decls.push(link_decl(p)); }
         else if (p_check(p, TkKwStruct)) { decls.push(struct_decl(p)); }
         else if (p_check(p, TkKwEnum))  { decls.push(enum_decl(p)); }
         else if (looks_like_func(p))    { decls.push(func_decl(p)); }

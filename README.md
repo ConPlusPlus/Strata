@@ -30,13 +30,17 @@ for i in 0..60 {
 
 ## Status
 
-Early. Milestone 1 (the compiler skeleton) is in progress:
+Early but real — programs **compile and run today** (compiler at v0.9.0):
 
-- ✅ lexer, parser, type checker, and minimal codegen — small programs **run today**
-- ⏳ next: the `lib/` runtime (arenas, strings), then first-class vector/matrix types
+- ✅ lexer, parser, type checker, C codegen
+- ✅ arena/region memory, structs, functions, control flow
+- ✅ first-class math: `vec2/3/4`, `mat4`, quaternions, swizzles
+- ✅ strings, and **C interop** (`import` a header, `link` a library, call C directly)
+- ✅ **a raylib window written in Strata** ([`compiler/examples/window.strata`](compiler/examples/window.strata)) builds to a single native binary
+- ⏳ next: a small prelude (input/time), C struct/enum binding, then SoA arrays and hot-reload
 
-The compiler is called **`stratac`** and is itself written in [D--](https://github.com/)
-(a self-hosting C-compiling language), which produces plain C.
+The compiler is called **`stratac`** and is itself written in D-- (a self-hosting
+C-compiling language), which produces plain C.
 
 ## Layout
 
