@@ -263,6 +263,7 @@ foreign "raylib.h" {                 // maps to one #include
 
 ## 10. Open decisions (rolled up)
 
+0. ~~Versioning scheme~~ — **settled: Semantic Versioning (Major.Minor.Patch).**
 1. **Const syntax** confirm `const NAME = v`.
 2. **Friendly-alias widths:** `int`=`i64`, `float`=`f32` — confirm.
 3. **Dynamic array / map syntax:** `T[dynamic]` and `Map<K,V>`.

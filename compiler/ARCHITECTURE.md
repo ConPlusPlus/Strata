@@ -186,7 +186,10 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
 4. ✅ `checker.dmm` — name resolution (linked-list scopes), type checking, arity,
    assignability, `var` inference (written back to the AST for codegen), `stratac check`.
    *Done — errors are located + recovering; golden-tested (`check/run1`, `check/errors`).*
-5. `lib/arena.h` runtime + `arena()` / `region { }` lowering.
+5. ✅ `lib/arena.h` runtime + structs + `arena()` / `.new(T)` / `region { }` lowering.
+   *Done — chunked arena (pointers stay stable), struct codegen, `.`→`->` auto-deref via
+   the checker's `rtype` annotation on expressions; golden-tested (`run/arena`).*
+6. Next: the `string` type + prelude, then math types (milestone 2: vec/mat/quat).
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

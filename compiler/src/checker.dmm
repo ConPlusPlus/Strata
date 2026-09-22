@@ -211,7 +211,15 @@ LvalueResult ck_lvalue(Checker* c, Expr* e) {
 
 // ---- expressions -------------------------------------------------------
 
+// Wrapper: check an expression, then annotate the AST node with its resolved type so
+// codegen can consult it (e.g. `.` vs `->`). All sub-expressions go through here too.
 Type* ck_expr(Checker* c, Expr* e) {
+    Type* t = ck_expr_i(c, e);
+    e.rtype = type_to_node(t);
+    return t;
+}
+
+Type* ck_expr_i(Checker* c, Expr* e) {
     switch (e.kind) {
         case ExIntLit:    return ty(TcInt, "int");
         case ExFloatLit:  return ty(TcFloat, "float");
@@ -385,9 +393,25 @@ Type* ck_expr(Checker* c, Expr* e) {
 Type* ck_call(Checker* c, Expr* e) {
     Expr* callee = e.a;
 
-    // method-style call `x.f(...)` - not resolved yet (UFCS/methods are backlog); check
-    // the receiver + args so names still resolve, and yield unknown.
     if (callee.kind == ExField) {
+        // arena allocation: `<arena>.new(T)` -> T* , allocated in the arena.
+        if (callee.field == "new") {
+            Type* recv = ck_expr(c, callee.a);
+            if (recv.cat != TcStruct || recv.name != "Arena") {
+                if (!t_is_unknown(recv)) { ck_error(c, e.line, e.col, ".new is only valid on an arena, got " + t_str(recv)); }
+            }
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, "new(T) takes exactly one type argument"); return ty(TcUnknown, "?"); }
+            Expr* arg = e.items[0];
+            if (arg.kind != ExName) { ck_error(c, arg.line, arg.col, "new() expects a type name"); return ty(TcUnknown, "?"); }
+            Type* elem = ck_prim(arg.text);
+            if (elem == null) {
+                if (ck_struct_index(c, arg.text) >= 0) { elem = ty(TcStruct, arg.text); }
+                else { ck_error(c, arg.line, arg.col, "unknown type '" + arg.text + "'"); elem = ty(TcUnknown, "?"); }
+            }
+            arg.rtype = type_to_node(elem);   // codegen reads this for sizeof(T)
+            return ty_ptr(elem);
+        }
+        // other method-style calls: not resolved yet (UFCS/methods are backlog).
         ck_expr(c, callee.a);
         for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
         return ty(TcUnknown, "?");
@@ -395,6 +419,12 @@ Type* ck_call(Checker* c, Expr* e) {
 
     if (callee.kind == ExName) {
         str name = callee.text;
+
+        // arena() -> a fresh arena (the region memory root)
+        if (name == "arena") {
+            if (e.items.len != 0) { ck_error(c, e.line, e.col, "arena() takes no arguments"); }
+            return ty(TcStruct, "Arena");
+        }
 
         // temporary built-in until the real prelude lands
         if (name == "print") {
@@ -513,7 +543,12 @@ void ck_stmt(Checker* c, Stmt* s) {
                 ck_pop(c);
             }
         case StRegion:
-            ck_block(c, s.body);
+            {
+                ck_push(c);
+                if (s.name.len > 0) { ck_declare(c, s.name, ty(TcStruct, "Arena"), false, s.line, s.col); }
+                ck_block(c, s.body);
+                ck_pop(c);
+            }
         default:
             {
             }

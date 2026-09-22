@@ -45,11 +45,12 @@ struct Expr {
     Expr*     a;          // Unary operand / Binary lhs / Call callee / Field obj / Index obj
     Expr*     b;          // Binary rhs / Index index
     Expr*[]   items;      // Call args / ArrayLit elems / StructLit args
+    TypeNode* rtype;      // resolved type, filled by the checker (null until then)
 }
 
 Expr* new_expr(ExprKind k, int line, int col) {
     Expr*[] items = [];
-    return new Expr{ k, line, col, "", "", "", false, null, null, items };
+    return new Expr{ k, line, col, "", "", "", false, null, null, items, null };
 }
 
 // ---- statements --------------------------------------------------------

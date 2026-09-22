@@ -1,0 +1,26 @@
+// arena.strata - structs + zero-GC arena memory (milestone 1, step 5).
+// Everything allocated in a region dies together; no malloc, no free in the language.
+
+struct Point {
+    int x
+    int y
+}
+
+int sum(Point* p) {
+    return p.x + p.y          // '.' auto-derefs through the pointer
+}
+
+var world = arena()           // a region
+var p = world.new(Point)      // allocate a Point in it (zeroed) -> Point*
+p.x = 3
+p.y = 4
+print(sum(p))                 // 7
+print(p.x)                    // 3
+
+// a scoped region: its memory is reclaimed at the closing brace
+region frame {
+    var q = frame.new(Point)
+    q.x = 10
+    q.y = 32
+    print(sum(q))             // 42
+}

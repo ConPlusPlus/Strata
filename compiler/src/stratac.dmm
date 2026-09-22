@@ -11,7 +11,7 @@
 #include "dump.dmm"    // print_tokens / print_program (+ the core via core.dmm)
 #include <stdlib.h>    // system()  (C header, passed through to the generated C)
 
-str stratac_version() { return "0.4.0 (lexer + parser + checker + minimal codegen)"; }
+str stratac_version() { return "0.5.0 (structs + arena memory)"; }
 
 // ---- paths -------------------------------------------------------------
 
@@ -30,6 +30,25 @@ str basename_of(str p) {
     int slash = 0 - 1;
     for (int i = 0; i < p.len; i++) { if (p[i] == '/' || p[i] == '\\') { slash = i; } }
     return substr(p, slash + 1, p.len - (slash + 1));
+}
+
+str dirname_of(str p) {
+    int slash = 0 - 1;
+    for (int i = 0; i < p.len; i++) { if (p[i] == '/' || p[i] == '\\') { slash = i; } }
+    if (slash < 0) { return "."; }
+    return substr(p, 0, slash);
+}
+
+bool file_exists(str p) { return read_file(p).len > 0; }
+
+// Find the runtime lib/ (arena.h, ...) relative to the stratac executable.
+str resolve_libdir(str argv0) {
+    str dir = dirname_of(argv0);
+    if (file_exists(dir + "/lib/arena.h"))    { return dir + "/lib"; }
+    if (file_exists(dir + "/../lib/arena.h")) { return dir + "/../lib"; }
+    if (file_exists("lib/arena.h"))           { return "lib"; }
+    if (file_exists("../lib/arena.h"))        { return "../lib"; }
+    return dir + "/lib";
 }
 
 // ---- pipeline helpers --------------------------------------------------
@@ -75,7 +94,7 @@ int cmd_emit(str path) {
     return 0;
 }
 
-bool build_exe(str path, bool quiet) {
+bool build_exe(str path, str libdir, bool quiet) {
     Token[] toks = lex(read_file(path));
     Parser p = Parser{ toks, 0, false, false };
     Program prog = parse_program(&p);
@@ -92,16 +111,16 @@ bool build_exe(str path, bool quiet) {
     str exepath = stem + ".exe";
     write_file(cpath, c);
 
-    // gnu11 for __auto_type (the `var` lowering until the checker infers types).
-    str cmd = "gcc -std=gnu11 -O2 \"" + cpath + "\" -o \"" + exepath + "\"";
+    // gnu11 for __auto_type; -I<libdir> so the emitted C finds <arena.h> and friends.
+    str cmd = "gcc -std=gnu11 -O2 \"" + cpath + "\" -I\"" + libdir + "\" -o \"" + exepath + "\"";
     int rc = system(cstr(cmd));
     if (rc != 0) { return false; }
     if (!quiet) { print("built " + exepath); }
     return true;
 }
 
-int cmd_run(str path, str[] args) {
-    if (!build_exe(path, true)) { return 1; }
+int cmd_run(str path, str libdir, str[] args) {
+    if (!build_exe(path, libdir, true)) { return 1; }
     str exe = stem_of(path) + ".exe";
     str exe2 = "";
     for (int i = 0; i < exe.len; i++) {
@@ -134,11 +153,12 @@ int main(str[] args) {
 
     str cmd  = args[1];
     str file = args[2];
+    str libdir = resolve_libdir(args[0]);
     if (cmd == "tokens") { return cmd_tokens(file); }
     if (cmd == "ast")    { return cmd_ast(file); }
     if (cmd == "check")  { return cmd_check(file); }
     if (cmd == "emit")   { return cmd_emit(file); }
-    if (cmd == "build")  { if (build_exe(file, false)) { return 0; } return 1; }
-    if (cmd == "run")    { return cmd_run(file, args); }
+    if (cmd == "build")  { if (build_exe(file, libdir, false)) { return 0; } return 1; }
+    if (cmd == "run")    { return cmd_run(file, libdir, args); }
     return usage();
 }

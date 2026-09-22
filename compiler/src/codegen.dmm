@@ -37,17 +37,21 @@ str cg_escape(str s) {     // re-escape a decoded string/char for a C literal
     return r;
 }
 
+// Map a Strata type NAME to its C spelling (struct/user names pass through unchanged).
+str cname(str n) {
+    if (n == "int")    { return "int64_t"; }
+    if (n == "float")  { return "float"; }
+    if (n == "bool")   { return "bool"; }
+    if (n == "void")   { return "void"; }
+    if (n == "string") { return "const char*"; }
+    if (n == "char")   { return "char"; }
+    return n;
+}
+
 str ty_to_c(TypeNode* t) {
     if (t == null) { return "void"; }
     switch (t.kind) {
-        case TyNamed:
-            if (t.name == "int")    { return "int64_t"; }
-            if (t.name == "float")  { return "float"; }
-            if (t.name == "bool")   { return "bool"; }
-            if (t.name == "void")   { return "void"; }
-            if (t.name == "string") { return "const char*"; }
-            if (t.name == "char")   { return "char"; }
-            return t.name;                       // pass-through (unsupported until checker/runtime)
+        case TyNamed:      return cname(t.name);
         case TyPointer:    return ty_to_c(t.elem) + "*";
         case TyArray:      return ty_to_c(t.elem) + "*";   // minimal: decay to pointer
         case TyFixedArray: return ty_to_c(t.elem) + "*";
@@ -58,13 +62,24 @@ str ty_to_c(TypeNode* t) {
 // ---- expressions -------------------------------------------------------
 
 str gen_call(Codegen* cg, Expr* e) {
-    // `print(x)` is a temporary built-in until the real prelude + checker land: it picks
-    // %s for a string literal, else prints as a 64-bit int.
+    // arena() -> a fresh arena
+    if (e.a.kind == ExName && e.a.text == "arena" && e.items.len == 0) { return "arena_make()"; }
+
+    // <arena>.new(T) -> (T*)arena_alloc(&<arena>, sizeof(T))
+    if (e.a.kind == ExField && e.a.field == "new" && e.items.len == 1 && e.items[0].kind == ExName) {
+        str recv  = gen_expr(cg, e.a.a);
+        str tname = cname(e.items[0].text);
+        return "(" + tname + "*)arena_alloc(&" + recv + ", sizeof(" + tname + "))";
+    }
+
+    // `print(x)` - temporary built-in until the real prelude lands: %s for a string
+    // literal, else print as a 64-bit int.
     if (e.a.kind == ExName && e.a.text == "print" && e.items.len == 1) {
         Expr* arg = e.items[0];
         if (arg.kind == ExStringLit) { return "printf(\"%s\\n\", " + gen_expr(cg, arg) + ")"; }
         return "printf(\"%lld\\n\", (long long)(" + gen_expr(cg, arg) + "))";
     }
+
     str s = gen_expr(cg, e.a) + "(";
     for (int i = 0; i < e.items.len; i++) { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
     return s + ")";
@@ -84,9 +99,21 @@ str gen_expr(Codegen* cg, Expr* e) {
             if (e.text == "..") { cg.had_error = true; return "0"; }   // ranges only in for..in
             return "(" + gen_expr(cg, e.a) + " " + e.text + " " + gen_expr(cg, e.b) + ")";
         case ExCall:  return gen_call(cg, e);
-        case ExField: return gen_expr(cg, e.a) + "." + e.field;        // minimal: no ptr distinction
+        case ExField:
+            {
+                // `.` auto-derefs: if the receiver is a pointer (per the checker's rtype), use `->`.
+                str op = ".";
+                if (e.a.rtype != null && e.a.rtype.kind == TyPointer) { op = "->"; }
+                return gen_expr(cg, e.a) + op + e.field;
+            }
         case ExIndex: return gen_expr(cg, e.a) + "[" + gen_expr(cg, e.b) + "]";
-        default:      cg.had_error = true; return "0";                 // ArrayLit/StructLit: later
+        case ExStructLit:
+            {
+                str s = "(" + cname(e.type_name) + "){";
+                for (int i = 0; i < e.items.len; i++) { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
+                return s + "}";
+            }
+        default:      cg.had_error = true; return "0";                 // ArrayLit: later
     }
     return "0";
 }
@@ -150,8 +177,17 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                 cg.out = cg.out + cg_indent(ind) + "/* unsupported for-in iterable (needs runtime) */\n";
             }
         case StRegion:
-            cg.had_error = true;
-            cg.out = cg.out + cg_indent(ind) + "/* region not supported yet (needs arena runtime) */\n";
+            {
+                str rname = s.name;
+                if (rname.len == 0) { rname = "_region"; }
+                cg.out = cg.out + cg_indent(ind) + "{\n";
+                cg.out = cg.out + cg_indent(ind + 1) + "Arena " + rname + " = arena_make();\n";
+                if (s.body != null && s.body.kind == StBlock) {
+                    for (int i = 0; i < s.body.stmts.len; i++) { gen_stmt(cg, ind + 1, s.body.stmts[i]); }
+                }
+                cg.out = cg.out + cg_indent(ind + 1) + "arena_free(&" + rname + ");\n";
+                cg.out = cg.out + cg_indent(ind) + "}\n";
+            }
         default:
             cg.had_error = true;
     }
@@ -175,7 +211,25 @@ str generate(Codegen* cg, Program prog) {
     cg.out = cg.out + "// Generated by stratac. Do not edit.\n";
     cg.out = cg.out + "#include <stdint.h>\n";
     cg.out = cg.out + "#include <stdbool.h>\n";
-    cg.out = cg.out + "#include <stdio.h>\n\n";
+    cg.out = cg.out + "#include <stdio.h>\n";
+    cg.out = cg.out + "#include <arena.h>\n\n";
+
+    // struct tags forward-declared first (so fields can reference any struct), then defined
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcStruct) { cg.out = cg.out + "typedef struct " + d.name + " " + d.name + ";\n"; }
+    }
+    for (int i = 0; i < prog.decls.len; i++) {
+        Decl* d = prog.decls[i];
+        if (d.kind == DcStruct) {
+            cg.out = cg.out + "struct " + d.name + " {\n";
+            for (int f = 0; f < d.fields.len; f++) {
+                cg.out = cg.out + "    " + ty_to_c(d.fields[f].type) + " " + d.fields[f].name + ";\n";
+            }
+            cg.out = cg.out + "};\n";
+        }
+    }
+    cg.out = cg.out + "\n";
 
     // forward declarations (so functions can call each other / recurse)
     for (int i = 0; i < prog.decls.len; i++) {
