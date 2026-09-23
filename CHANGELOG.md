@@ -8,6 +8,19 @@ GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [0.17.0] - 2026-09-22
+### Added
+- **Self-hosting: the parser is ported.** `selfhost/` now also has `srcmap`, `ast`, `parser`
+  and the full `dump` (token + AST printer), and the Strata-written driver has an `ast`
+  command. The self-hosting test checks both `tokens` and `ast` output, byte-for-byte,
+  over 36 files. Still no hand edits in the ported modules.
+### Changed
+- **Newlines inside `(` and `[` no longer end a statement** (Python's rule), so a condition
+  or argument list can wrap after any token, e.g. a line ending in an identifier.
+### Fixed
+- `dmm2strata.py` converts `new T{...}` literals that span lines or nest, by matching
+  braces over the whole text rather than line by line.
+
 ## [0.16.0] - 2026-09-22
 ### Added
 - **Self-hosting begins:** `compiler/selfhost/` holds the compiler being ported to Strata.

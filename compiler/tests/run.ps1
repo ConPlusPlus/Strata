@@ -62,7 +62,7 @@ if (-not $?) {
 } else {
     $selfexe = Join-Path $selfhost "stratac.exe"
     $inputs  = @(Get-ChildItem $examples -Filter *.strata) + @(Get-ChildItem $selfhost -Filter *.strata) + @(Get-ChildItem $src -Include *.dmm,*.hmm -Recurse)
-    foreach ($stage in @("tokens")) {
+    foreach ($stage in @("tokens", "ast")) {
         $bad = @()
         foreach ($f in $inputs) {
             $want = (& $strata  $stage $f.FullName) -join "`n"

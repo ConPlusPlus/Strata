@@ -6,20 +6,47 @@
 // ported; each stage is validated byte-for-byte against the D-- build.
 //
 //   stratac tokens <file.strata>   print the token stream
+//   stratac ast    <file.strata>   parse and print the AST
 
 import dump
 import <stdlib.h>
 
+string basename_of(string p) {
+    int slash = 0 - 1
+    for i in 0..p.len { if p[i] == '/' || p[i] == '\\' { slash = i } }
+    return substr(p, slash + 1, p.len - (slash + 1))
+}
+
+void report_parse_error(Parser* p, SrcMap* map, string path) {
+    print(src_loc(map, basename_of(path), p.err_line, p.err_col) + ": parse error: " + p.err_msg)
+}
+
+int cmd_tokens(string path) {
+    print_tokens(lex(read_file(path)))
+    return 0
+}
+
+int cmd_ast(string path) {
+    Token[dynamic] toks = lex(read_file(path))
+    Parser p = new_parser(toks)
+    Program prog = parse_program(&p)
+    if p.had_error { report_parse_error(&p, null, path); return 1 }
+    print_program(prog)
+    return 0
+}
+
 var argv = args()
 if argv.len < 3 {
-    print("usage: stratac tokens <file.strata>")
+    print("usage: stratac tokens|ast <file.strata>")
     exit(2)
 }
 string cmd  = argv[1]
 string path = argv[2]
 if cmd == "tokens" {
-    print_tokens(lex(read_file(path)))
-} else {
-    print("unknown command: " + cmd)
-    exit(2)
+    exit(cmd_tokens(path))
 }
+if cmd == "ast" {
+    exit(cmd_ast(path))
+}
+print("unknown command: " + cmd)
+exit(2)

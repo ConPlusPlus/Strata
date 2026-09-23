@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 0.16.0** · tests: **18/18** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 0.17.0** · tests: **19/19** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -36,7 +36,7 @@ self-hosting, C-compiling language (in `C:\DMinusMinus`). The long-term plan is 
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v0.16.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v0.17.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -135,7 +135,7 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 ## 5. The language today (what's implemented)
 
 **Feel:** types-first (C#-like), `var` inference, newline-terminated (`;` optional, as a
-separator for several statements on one line), braces for
+separator for several statements on one line; newlines inside `(`/`[` don't count), braces for
 blocks, paren-free control flow. Source files: `.strata` (canonical) / `.str` (alias).
 
 **Types:** `int` (=i64), `float` (=f32), `bool`, `char`, `string` (a C `const char*`),
@@ -192,7 +192,7 @@ public (currently advisory — not yet enforced).
 
 Golden-file tests in `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
 against `stratac <stage> examples/<name>.strata`. `run.ps1` rebuilds the compiler and runs
-all of them. **18 passing**: 17 goldens across stages `tokens`, `ast`, `check`, `run`, plus
+all of them. **19 passing**: 17 goldens across stages `tokens`, `ast`, `check`, `run`, plus
 the **self-hosting check**: it builds `selfhost/stratac.strata` and requires its output to be
 byte-identical to the D-- build for every ported stage over all examples + compiler sources.
 GUI examples
@@ -233,11 +233,14 @@ alloc+null), `casts` (`cast<T>`/`sizeof`), `prelude`, `modules`+`greetlib` (impo
 
 | Module | Status |
 |---|---|
-| `token`, `lexer` | ✅ ported (v0.16.0), `tokens` output byte-identical on 33 files |
-| `dump` | token printer ported; AST printer next (needs `ast`) |
-| `srcmap`, `ast`, `parser` | **next** → enables the `ast` stage |
-| `checker`, `codegen` | then → `check` / `emit` stages |
-| `stratac` driver | grows per stage (only `tokens` today) |
+| `token`, `lexer` | ✅ ported (v0.16.0) → `tokens` stage |
+| `srcmap`, `ast`, `parser`, `dump` | ✅ ported (v0.17.0) → `ast` stage. `dump` temporarily imports `parser` instead of `core` |
+| `checker` | **next** → `check` stage |
+| `codegen`, `core` | then → `emit` / `build` / `run` |
+| `stratac` driver | hand-written, grows per stage (`tokens`, `ast` today); becomes the translated `src/stratac.dmm` at the end |
+
+Both ported stages are byte-identical to the D-- build on 36 files (every example, every
+`selfhost/*.strata`, every `src/*.dmm`/`.hmm`).
 
 The loop for each module:
 1. `python tools/dmm2strata.py compiler/src/<m>.dmm > compiler/selfhost/<m>.strata`.

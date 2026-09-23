@@ -12,7 +12,9 @@
 //     token only when the previous token can END a statement (identifier, literal,
 //     `)`, `]`, `}`, `return`, `true`, `false`). After an operator, comma, or an open
 //     bracket the newline is swallowed, so multi-line expressions continue naturally
-//     (the same rule Go uses for automatic semicolons).
+//     (the same rule Go uses for automatic semicolons). And inside an open `(` or `[`
+//     no NEWLINE is emitted at all, so a wrapped condition or argument list continues
+//     (Python's rule).
 
 #include "token.hmm"   // TokKind + Token
 
@@ -285,13 +287,14 @@ Token[] lex(str src) {
     Lexer lx = Lexer{ src, 0, 1, 1, 0, 1, 1, false, false };
     TokKind last = TkError;
     bool have_last = false;
+    int  nest = 0;   // open ( and [ : newlines inside them never end a statement
 
     lx.saw_newline = false;
     skip_trivia(&lx);
     while (!at_end(&lx)) {
         // Insert a NEWLINE terminator if the skipped trivia crossed a line and the
         // previous real token can end a statement.
-        if (lx.saw_newline && have_last && ends_statement(last)) {
+        if (lx.saw_newline && have_last && nest == 0 && ends_statement(last)) {
             tokens.push(Token{ TkNewline, "", lx.line, lx.col });
         }
         lx.saw_newline = false;
@@ -302,6 +305,8 @@ Token[] lex(str src) {
         Token t = scan_token(&lx);
         tokens.push(t);
         last = t.kind;
+        if (t.kind == TkLParen || t.kind == TkLBracket) { nest += 1; }
+        else if ((t.kind == TkRParen || t.kind == TkRBracket) && nest > 0) { nest -= 1; }
         have_last = true;
         skip_trivia(&lx);
     }

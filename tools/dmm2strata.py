@@ -54,9 +54,48 @@ def convert_include(line):
         return f'{m.group(1)}import {m.group(2)}' + (('   ' + comment) if comment else '')
     return line
 
-def convert_new(line):
-    # new Type{ ... }  ->  alloc(Type{ ... })   (flat braces only)
-    return re.sub(r'\bnew\s+(\w+)\s*\{([^{}]*)\}', r'alloc(\1{\2})', line)
+NEW_RE = re.compile(r'\bnew\s+(\w+)\s*\{')
+
+def convert_new_text(text):
+    # new Type{ ... }  ->  alloc(Type{ ... })  over the WHOLE text, matching braces, so
+    # literals spanning lines and nested literals convert too. Skips strings, chars and
+    # // comments while matching.
+    out = []
+    i = 0
+    while True:
+        m = NEW_RE.search(text, i)
+        if not m:
+            out.append(text[i:])
+            return ''.join(out)
+        # the `new` must be code, not inside a comment or string on its line
+        line_start = text.rfind('\n', 0, m.start()) + 1
+        code, _, _ = split_comment(text[line_start:m.start()] + 'x')
+        if not code.endswith('x') or code.count('"') % 2 == 1:
+            out.append(text[i:m.end()])
+            i = m.end()
+            continue
+        j = m.end()            # just past the opening `{`
+        depth = 1
+        while j < len(text) and depth > 0:
+            c = text[j]
+            if c in '"\'':    # skip a string/char literal
+                q = c; j += 1
+                while j < len(text) and text[j] != q:
+                    j += 2 if text[j] == '\\' else 1
+            elif c == '/' and text[j:j+2] == '//':
+                j = text.find('\n', j)
+                if j < 0: j = len(text)
+                continue
+            elif c == '{': depth += 1
+            elif c == '}': depth -= 1
+            j += 1
+        if depth > 0:          # unbalanced: leave it for a human
+            out.append(text[i:m.end()])
+            i = m.end()
+            continue
+        inner = convert_new_text(text[m.end():j-1])   # nested `new`s
+        out.append(text[i:m.start()] + 'alloc(' + m.group(1) + '{' + inner + '})')
+        i = j
 
 def convert_for(line):
     # for (int i = A; i < B; i++)  ->  for i in A..B     (the common counting idiom)
@@ -79,7 +118,7 @@ FLAGS = [
     (r'\bglobal\b',        'global - not in Strata'),
     (r'\bextern\b',        'extern - use import/link in Strata'),
     (r'for\s*\(',          'C-style for that was not the counting idiom - convert to for-in/while by hand'),
-    (r'\bnew\s+\w+\s*\{[^}]*\{', 'nested new{...} - convert alloc() by hand'),
+    (r'\bnew\s+\w+\s*\{', 'new T{...} the translator could not convert - use alloc(T{...})'),
 ]
 
 def flags_for(line):
@@ -92,10 +131,10 @@ def flags_for(line):
 
 def translate(text):
     out = []
+    text = convert_new_text(text)
     for raw in text.split('\n'):
         line = convert_include(raw)
         if not line.lstrip().startswith('import'):
-            line = convert_new(line)
             line = convert_for(line)
             line = convert_words(line)
             line = strip_line_terminator(line)
