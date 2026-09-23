@@ -281,7 +281,8 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 if (v.found) { return v.type; }
                 str en = ck_enum_member(c, e.text);
                 if (en != "") { return ty(TcInt, en); }
-                if (e.text == "PI") { return ty(TcFloat, "float"); }   // prelude constant
+                if (e.text == "PI") { return ty(TcFloat, "float"); }        // prelude constant
+                if (e.text == "null") { return ty_ptr(ty(TcUnknown, "?")); }  // null pointer
                 // unknown name: an external C symbol (e.g. a raylib constant) if a header
                 // was imported; otherwise a real error.
                 if (!c.has_foreign) { ck_error(c, e.line, e.col, "use of undeclared name '" + e.text + "'"); }
@@ -546,6 +547,13 @@ Type* ck_call(Checker* c, Expr* e) {
             if (e.items.len != 3) { ck_error(c, e.line, e.col, name + "() takes 3 arguments"); }
             for (int i = 0; i < e.items.len; i++) { Type* a = ck_expr(c, e.items[i]); if (!t_is_numeric(a) && !t_is_unknown(a)) { ck_error(c, e.items[i].line, e.items[i].col, name + " expects numbers, got " + t_str(a)); } }
             return ty(TcFloat, "float");
+        }
+
+        // alloc(value) -> boxes any value in the global heap, returns a pointer to it
+        if (name == "alloc") {
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, "alloc(value) takes exactly one argument"); return ty(TcUnknown, "?"); }
+            Type* vt = ck_expr(c, e.items[0]);
+            return ty_ptr(vt);
         }
 
         // vector constructors: vecN(components...) or vecN(scalar) to splat

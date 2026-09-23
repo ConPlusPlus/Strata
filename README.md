@@ -40,6 +40,7 @@ Early but real — programs **compile and run today** (compiler at v0.9.0):
 - ✅ **enums + `switch`** (multi-value cases, no fall-through) — state machines
 - ✅ **modules** (`import Name` to pull in another `.strata` file; `export` to mark public)
 - ✅ a small **prelude** (`min`/`max`/`clamp`/`lerp`/`PI`)
+- ✅ `alloc(value)` + `null` — heap-allocated node graphs (e.g. an AST)
 - ✅ **games written in Strata** — a raylib window ([`window.strata`](compiler/examples/window.strata))
   and an **arrow-key-driven sprite** ([`sprite.strata`](compiler/examples/sprite.strata), movement
   computed with Strata's own `vec2` math) build to single native binaries

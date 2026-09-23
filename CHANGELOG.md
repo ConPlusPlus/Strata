@@ -8,6 +8,14 @@ GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [0.14.0] - 2026-09-22
+### Added
+- **`alloc(value)`** — boxes any value in a global heap and returns a pointer to it
+  (allocate-and-initialize; `world.new(T)` remains for zeroed region allocation).
+- **`null`** — the null pointer, assignable to any pointer type.
+- Together these enable heap-allocated node graphs (e.g. a compiler's AST) — the last
+  core piece before self-hosting. Example: `examples/list.strata` (a linked list).
+
 ## [0.13.0] - 2026-09-22
 ### Added
 - **Modules:** `import Name` pulls in `Name.strata`; dotted paths go through folders

@@ -1,0 +1,16 @@
+// list.strata - a linked list: alloc-with-init + null + pointer chains
+// (the exact pattern a compiler's AST uses).
+struct Node { int val; Node* next }
+
+var head = alloc(Node{ 3, null })
+head = alloc(Node{ 2, head })
+head = alloc(Node{ 1, head })
+
+var sum = 0
+var cur = head
+while cur != null {
+    sum = sum + cur.val
+    cur = cur.next
+}
+print(sum)                    // 6
+print(head.next.next.val)     // 3
