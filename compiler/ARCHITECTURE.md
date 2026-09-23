@@ -213,8 +213,14 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
 10. ✅ **Enums + `switch`.** Enums compile to C enums; `switch subject { case A: ...
     case B, C: ... default: ... }` with **no fall-through** (a `break` per case) and
     multi-value cases. Works on ints and enums — the AST-dispatch pattern a self-hosted
-    compiler needs. Golden-tested (`run/switch`). *With this, Strata has the core needed to
-    self-host. Next: a prelude, tagged unions, engine-type binding, or SoA (M4).*
+    compiler needs. Golden-tested (`run/switch`).
+11. ✅ **Prelude + modules.** Prelude helpers (`min`/`max`/`clamp`/`lerp`/`PI`,
+    `lib/sprelude.h`). **Modules:** `import Name` pastes `Name.strata` (dotted paths →
+    folders; deduplicated, recursive) — the driver's module preprocessor mirrors D--'s
+    `#include`. `export` marks decls public (intent; enforcement later). Golden-tested
+    (`run/prelude`, `run/modules`). **With multi-file + switch + arrays, Strata can now
+    express a compiler — self-hosting is unblocked.** *Next: port a module (e.g. the lexer)
+    to Strata, or tagged unions / SoA.*
 
 Only after this thin slice runs do we add math types (milestone 2), then the backlog
 features — each slotting into the phase it belongs to, never sprawling across all of them.

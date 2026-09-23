@@ -14,7 +14,7 @@
 #include "dump.dmm"    // print_tokens / print_program (+ the core via core.dmm)
 #include <stdlib.h>    // system()  (C header, passed through to the generated C)
 
-str stratac_version() { return "0.12.0 (prelude: min/max/clamp/lerp/PI)"; }
+str stratac_version() { return "0.13.0 (modules: import/export)"; }
 
 // ---- paths -------------------------------------------------------------
 
@@ -54,6 +54,77 @@ str resolve_libdir(str argv0) {
     return dir + "/lib";
 }
 
+// ---- module resolution -------------------------------------------------
+// `import Name` / `import a.b.Name` pastes the contents of Name.strata / a/b/Name.strata
+// (recursively, deduplicated) into the source. C-header imports (import "x.h" /
+// import <x.h>) are left in place for codegen. Mirrors D--'s #include preprocessor.
+
+struct ModPP { str[] seen; str out; }
+
+bool mod_seen(ModPP* pp, str path) {
+    for (int i = 0; i < pp.seen.len; i++) { if (pp.seen[i] == path) { return true; } }
+    return false;
+}
+
+// If `line` is a Strata module import, return the module name; else return "".
+str parse_module_import(str line) {
+    int i = 0;
+    while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
+    str kw = "import";
+    if (i + kw.len > line.len) { return ""; }
+    if (substr(line, i, kw.len) != kw) { return ""; }
+    i = i + kw.len;
+    if (i >= line.len || (line[i] != ' ' && line[i] != '\t')) { return ""; }   // needs a space
+    while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
+    if (i >= line.len) { return ""; }
+    char c = line[i];
+    if (c == '<' || c == '"') { return ""; }   // a C header, not a module
+    str name = "";
+    while (i < line.len && line[i] != ' ' && line[i] != '\t' && line[i] != '\r') { name = name + substr(line, i, 1); i = i + 1; }
+    return name;
+}
+
+str module_to_path(str base, str name) {
+    str rel = "";
+    for (int i = 0; i < name.len; i++) { if (name[i] == '.') { rel = rel + "/"; } else { rel = rel + substr(name, i, 1); } }
+    return base + "/" + rel + ".strata";
+}
+
+void mod_line(ModPP* pp, str line, str base) {
+    str name = parse_module_import(line);
+    if (name.len > 0) {
+        str resolved = module_to_path(base, name);
+        if (!mod_seen(pp, resolved)) {
+            pp.seen.push(resolved);
+            mod_file(pp, resolved);
+        }
+    } else {
+        pp.out = pp.out + line + "\n";
+    }
+}
+
+void mod_file(ModPP* pp, str path) {
+    str src = read_file(path);
+    str base = dirname_of(path);
+    str line = "";
+    for (int i = 0; i <= src.len; i++) {
+        if (i == src.len) {
+            if (line.len > 0) { mod_line(pp, line, base); }
+        } else {
+            if (src[i] == '\n') { mod_line(pp, line, base); line = ""; }
+            else                { line = line + substr(src, i, 1); }
+        }
+    }
+}
+
+str resolve_modules(str path) {
+    str[] seed = [];
+    ModPP pp = ModPP{ seed, "" };
+    pp.seen.push(path);
+    mod_file(&pp, path);
+    return pp.out;
+}
+
 // ---- pipeline helpers --------------------------------------------------
 
 int cmd_tokens(str path) {
@@ -71,7 +142,7 @@ int cmd_ast(str path) {
 }
 
 int cmd_check(str path) {
-    Token[] toks = lex(read_file(path));
+    Token[] toks = lex(resolve_modules(path));
     Parser p = Parser{ toks, 0, false, false };
     Program prog = parse_program(&p);
     if (p.had_error) { print("parse error in " + path); return 1; }
@@ -83,7 +154,7 @@ int cmd_check(str path) {
 }
 
 int cmd_emit(str path) {
-    Token[] toks = lex(read_file(path));
+    Token[] toks = lex(resolve_modules(path));
     Parser p = Parser{ toks, 0, false, false };
     Program prog = parse_program(&p);
     if (p.had_error) { print("parse error in " + path); return 1; }
@@ -98,7 +169,7 @@ int cmd_emit(str path) {
 }
 
 bool build_exe(str path, str libdir, bool quiet) {
-    Token[] toks = lex(read_file(path));
+    Token[] toks = lex(resolve_modules(path));
     Parser p = Parser{ toks, 0, false, false };
     Program prog = parse_program(&p);
     if (p.had_error) { print("parse error in " + path); return false; }

@@ -213,11 +213,14 @@ Program parse_program(Parser* p) {
     Stmt*[] main  = [];
     skip_newlines(p);
     while (!p_at_end(p) && !p.had_error) {
-        if (p_check(p, TkKwImport))     { decls.push(import_decl(p)); }
+        bool exported = false;
+        if (p_check(p, TkKwExport)) { p_advance(p); exported = true; skip_newlines(p); }
+        if (p_check(p, TkKwStruct))     { Decl* d = struct_decl(p); d.is_exported = exported; decls.push(d); }
+        else if (p_check(p, TkKwEnum))  { Decl* d = enum_decl(p);   d.is_exported = exported; decls.push(d); }
+        else if (looks_like_func(p))    { Decl* d = func_decl(p);   d.is_exported = exported; decls.push(d); }
+        else if (exported)              { p.had_error = true; p_advance(p); }   // `export` must precede a decl
+        else if (p_check(p, TkKwImport)) { decls.push(import_decl(p)); }
         else if (p_check(p, TkKwLink))  { decls.push(link_decl(p)); }
-        else if (p_check(p, TkKwStruct)) { decls.push(struct_decl(p)); }
-        else if (p_check(p, TkKwEnum))  { decls.push(enum_decl(p)); }
-        else if (looks_like_func(p))    { decls.push(func_decl(p)); }
         else {
             int before = p.pos;
             main.push(statement(p));

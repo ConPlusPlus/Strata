@@ -142,6 +142,8 @@ struct Decl {
     // DcInclude (C interop: `import "header.h"` / `import <header.h>`)
     str        path;
     bool       is_system;
+    // module system: was this decl `export`ed?
+    bool       is_exported;
 }
 
 Decl* new_decl(DeclKind k, int line, int col) {
@@ -154,7 +156,8 @@ Decl* new_decl(DeclKind k, int line, int col) {
         params, null, null,      // params, ret, body
         fields,                  // fields
         members,                 // members
-        "", false                // path, is_system
+        "", false,               // path, is_system
+        false                    // is_exported
     };
 }
 

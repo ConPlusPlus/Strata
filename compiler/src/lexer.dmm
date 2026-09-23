@@ -200,6 +200,7 @@ TokKind keyword_kind(str w) {
     if (w == "switch")  { return TkKwSwitch; }
     if (w == "case")    { return TkKwCase; }
     if (w == "default") { return TkKwDefault; }
+    if (w == "export")  { return TkKwExport; }
     return TkIdent;
 }
 
@@ -337,6 +338,7 @@ str kind_name(TokKind k) {
         case TkKwSwitch:  return "switch";
         case TkKwCase:    return "case";
         case TkKwDefault: return "default";
+        case TkKwExport:  return "export";
         case TkLParen:    return "(";
         case TkRParen:    return ")";
         case TkLBrace:    return "{";

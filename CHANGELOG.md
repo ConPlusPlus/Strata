@@ -8,6 +8,14 @@ GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [0.13.0] - 2026-09-22
+### Added
+- **Modules:** `import Name` pulls in `Name.strata`; dotted paths go through folders
+  (`import gfx.Renderer` → `gfx/Renderer.strata`). Deduplicated and recursive. Distinct
+  from the quoted/angled `import "x.h"` / `import <x.h>` C-header form.
+- **`export`** marks a declaration public (intent; full private-symbol enforcement is
+  planned). This is the multi-file support needed to eventually self-host the compiler.
+
 ## [0.12.0] - 2026-09-22
 ### Added
 - **Prelude** (always in scope): `min`, `max`, `clamp`, `lerp`, and the constant `PI`.
@@ -66,7 +74,9 @@ Built before the first tagged release:
 - The compiler (`stratac`), written in D--, split into a reusable core + front-ends
   (`stratac` CLI, `console`, `libstrata.dll`), with a byte-for-byte golden test suite.
 
-[Unreleased]: https://github.com/UseStrata/Strata/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/UseStrata/Strata/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/UseStrata/Strata/releases/tag/v0.13.0
+[0.12.0]: https://github.com/UseStrata/Strata/releases/tag/v0.12.0
 [0.11.0]: https://github.com/UseStrata/Strata/releases/tag/v0.11.0
 [0.10.0]: https://github.com/UseStrata/Strata/releases/tag/v0.10.0
 [0.9.0]: https://github.com/UseStrata/Strata/releases/tag/v0.9.0

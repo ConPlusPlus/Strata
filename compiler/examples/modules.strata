@@ -1,0 +1,4 @@
+// modules.strata - import another Strata file by name (Roblox-style).
+import greetlib
+print(greet("strata"))     // hello, strata
+print(add(2, 3))           // 5

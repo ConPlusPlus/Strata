@@ -1,0 +1,3 @@
+// greetlib.strata - a Strata module (imported by other files via `import greetlib`).
+export string greet(string name) { return "hello, " + name }
+export int add(int a, int b)     { return a + b }
