@@ -251,6 +251,8 @@ The loop for each module:
 
 **Endgame:** when every stage matches, compile `selfhost/` with *itself* and check the
 output is byte-identical (the fixpoint, as D-- did). Then freeze the D-- bootstrap.
+**Self-hosting complete = v1.0.0**: the release where `stratac` is built from `selfhost/`
+(decided 2026-09-22). Until then, keep bumping 0.x minors per feature.
 
 **Keep `src/` and `selfhost/` in sync:** until the switch-over, changes to `src/*.dmm`
 must be re-translated (or mirrored) into `selfhost/`; the self-hosting test catches drift.
