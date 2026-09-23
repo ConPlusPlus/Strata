@@ -14,7 +14,7 @@
 #include "dump.dmm"    // print_tokens / print_program (+ the core via core.dmm)
 #include <stdlib.h>    // system()  (C header, passed through to the generated C)
 
-str stratac_version() { return "0.15.0 (cast<T> + sizeof)"; }
+str stratac_version() { return "0.16.0 (self-hosting: lexer ported)"; }
 
 // ---- paths -------------------------------------------------------------
 
@@ -59,7 +59,7 @@ str resolve_libdir(str argv0) {
 // (recursively, deduplicated) into the source. C-header imports (import "x.h" /
 // import <x.h>) are left in place for codegen. Mirrors D--'s #include preprocessor.
 
-struct ModPP { str[] seen; str out; }
+struct ModPP { str[] seen; str out; SrcMap* map; }
 
 bool mod_seen(ModPP* pp, str path) {
     for (int i = 0; i < pp.seen.len; i++) { if (pp.seen[i] == path) { return true; } }
@@ -90,7 +90,7 @@ str module_to_path(str base, str name) {
     return base + "/" + rel + ".strata";
 }
 
-void mod_line(ModPP* pp, str line, str base) {
+void mod_line(ModPP* pp, str line, str base, str path, int lineno) {
     str name = parse_module_import(line);
     if (name.len > 0) {
         str resolved = module_to_path(base, name);
@@ -100,6 +100,8 @@ void mod_line(ModPP* pp, str line, str base) {
         }
     } else {
         pp.out = pp.out + line + "\n";
+        pp.map.files.push(basename_of(path));
+        pp.map.lines.push(lineno);
     }
 }
 
@@ -107,25 +109,30 @@ void mod_file(ModPP* pp, str path) {
     str src = read_file(path);
     str base = dirname_of(path);
     str line = "";
+    int lineno = 1;
     for (int i = 0; i <= src.len; i++) {
         if (i == src.len) {
-            if (line.len > 0) { mod_line(pp, line, base); }
+            if (line.len > 0) { mod_line(pp, line, base, path, lineno); }
         } else {
-            if (src[i] == '\n') { mod_line(pp, line, base); line = ""; }
+            if (src[i] == '\n') { mod_line(pp, line, base, path, lineno); line = ""; lineno += 1; }
             else                { line = line + substr(src, i, 1); }
         }
     }
 }
 
-str resolve_modules(str path) {
+str resolve_modules(str path, SrcMap* map) {
     str[] seed = [];
-    ModPP pp = ModPP{ seed, "" };
+    ModPP pp = ModPP{ seed, "", map };
     pp.seen.push(path);
     mod_file(&pp, path);
     return pp.out;
 }
 
 // ---- pipeline helpers --------------------------------------------------
+
+void report_parse_error(Parser* p, SrcMap* map, str path) {
+    print(src_loc(map, basename_of(path), p.err_line, p.err_col) + ": parse error: " + p.err_msg);
+}
 
 int cmd_tokens(str path) {
     print_tokens(lex(read_file(path)));
@@ -134,19 +141,21 @@ int cmd_tokens(str path) {
 
 int cmd_ast(str path) {
     Token[] toks = lex(read_file(path));
-    Parser p = Parser{ toks, 0, false, false };
+    Parser p = new_parser(toks);
     Program prog = parse_program(&p);
-    if (p.had_error) { print("parse error in " + path); return 1; }
+    if (p.had_error) { report_parse_error(&p, null, path); return 1; }
     print_program(prog);
     return 0;
 }
 
 int cmd_check(str path) {
-    Token[] toks = lex(resolve_modules(path));
-    Parser p = Parser{ toks, 0, false, false };
+    SrcMap* map = new_srcmap();
+    Token[] toks = lex(resolve_modules(path, map));
+    Parser p = new_parser(toks);
     Program prog = parse_program(&p);
-    if (p.had_error) { print("parse error in " + path); return 1; }
+    if (p.had_error) { report_parse_error(&p, map, path); return 1; }
     Checker* ck = new_checker(basename_of(path));
+    ck.map = map;
     ck_check(ck, prog);
     if (ck.had_error) { return 1; }
     print("no type errors");
@@ -154,11 +163,13 @@ int cmd_check(str path) {
 }
 
 int cmd_emit(str path) {
-    Token[] toks = lex(resolve_modules(path));
-    Parser p = Parser{ toks, 0, false, false };
+    SrcMap* map = new_srcmap();
+    Token[] toks = lex(resolve_modules(path, map));
+    Parser p = new_parser(toks);
     Program prog = parse_program(&p);
-    if (p.had_error) { print("parse error in " + path); return 1; }
+    if (p.had_error) { report_parse_error(&p, map, path); return 1; }
     Checker* ck = new_checker(basename_of(path));
+    ck.map = map;
     ck_check(ck, prog);
     if (ck.had_error) { return 1; }
     Codegen cg = Codegen{ "", false };
@@ -169,11 +180,13 @@ int cmd_emit(str path) {
 }
 
 bool build_exe(str path, str libdir, bool quiet) {
-    Token[] toks = lex(resolve_modules(path));
-    Parser p = Parser{ toks, 0, false, false };
+    SrcMap* map = new_srcmap();
+    Token[] toks = lex(resolve_modules(path, map));
+    Parser p = new_parser(toks);
     Program prog = parse_program(&p);
-    if (p.had_error) { print("parse error in " + path); return false; }
+    if (p.had_error) { report_parse_error(&p, map, path); return false; }
     Checker* ck = new_checker(basename_of(path));
+    ck.map = map;
     ck_check(ck, prog);
     if (ck.had_error) { return false; }
     Codegen cg = Codegen{ "", false };
@@ -206,6 +219,8 @@ int cmd_run(str path, str libdir, str[] args) {
     for (int i = 0; i < exe.len; i++) {
         if (exe[i] == '/') { exe2 = exe2 + "\\"; } else { exe2 = exe2 + substr(exe, i, 1); }
     }
+    // a bare `prog.exe` is not found when the shell doesn't search the current dir
+    if (dirname_of(exe2) == ".") { exe2 = ".\\" + exe2; }
     str runcmd = "\"" + exe2 + "\"";
     for (int i = 3; i < args.len; i++) { runcmd = runcmd + " \"" + args[i] + "\""; }
     runcmd = "\"" + runcmd + "\"";   // cmd.exe strips the outer quote pair

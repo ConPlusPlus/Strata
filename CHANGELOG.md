@@ -8,6 +8,32 @@ GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [0.16.0] - 2026-09-22
+### Added
+- **Self-hosting begins:** `compiler/selfhost/` holds the compiler being ported to Strata.
+  The lexer (`token.strata`, `lexer.strata`), the token printer (`dump.strata`) and a
+  `tokens`-only driver (`stratac.strata`) are ported. They were converted by
+  `tools/dmm2strata.py` with no hand edits. `tests/run.ps1` builds the Strata-written
+  driver and requires its output to be byte-identical to the D-- build over every example
+  and every compiler source file (33 files).
+- **Built-ins** (the set the compiler source uses, same signatures as D--):
+  `substr(s, start, len)`, `int_to_str(n)`, `read_file(path)`, `write_file(path, data)`,
+  `cstr(s)` (identity; a `string` already is a C string), and `args()` (the command line
+  as a `string[dynamic]`). New runtime header `lib/sio.h`.
+- **`;` is an optional statement separator** (as in Go), so `{ a; b }` fits on one line.
+- **Parse errors are located:** `file:line:col: parse error: expected ')', got NEWLINE`
+  (previously just "parse error in <file>").
+### Fixed
+- Errors in imported modules report the module's own file and line (a line map is kept
+  while modules are pasted together); previously lines were offsets into the combined text.
+- An array literal takes its element type from the array type it initializes or is
+  assigned to, returned as or passed as. `Token[dynamic] ts = []` previously allocated
+  8-byte elements.
+- `'` and NUL are escaped in emitted C char/string literals (`'\''` produced invalid C).
+- `stratac run prog.strata` (no directory in the path) now finds the built exe.
+- `dmm2strata.py`: converts `#include` lines that carry a trailing comment, maps D--'s
+  growable `T[]` to `T[dynamic]`, writes UTF-8, and no longer flags lines it converted.
+
 ## [0.15.0] - 2026-09-22
 ### Added
 - **`cast<T>(x)`** — explicit conversion: between scalars (`int`/sized ints/`float`/

@@ -98,6 +98,7 @@ struct Checker {
     EnumMember[] enum_members;
     Scope*       scope;
     Type*        cur_ret;
+    SrcMap*      map;           // module line map (null => lines are file lines)
 }
 
 struct LookupResult { bool found; Type* type; bool is_const; }
@@ -105,7 +106,7 @@ struct LvalueResult { bool ok; bool is_const; }
 
 void ck_error(Checker* c, int line, int col, str msg) {
     c.had_error = true;
-    print(c.file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg);
+    print(src_loc(c.map, c.file, line, col) + ": error: " + msg);
 }
 
 // ---- table helpers -----------------------------------------------------
@@ -276,6 +277,18 @@ LvalueResult ck_lvalue(Checker* c, Expr* e) {
 Type* ck_expr(Checker* c, Expr* e) {
     Type* t = ck_expr_i(c, e);
     e.rtype = type_to_node(t);
+    return t;
+}
+
+// Check `e` where a value of type `target` is expected. An array literal takes its
+// element type from the target (so `Token[dynamic] ts = []` and `u8[dynamic] b = [1, 2]`
+// allocate Token- / u8-sized elements, not the literal's guess).
+Type* ck_expr_as(Checker* c, Expr* e, Type* target) {
+    Type* t = ck_expr(c, e);
+    if (e.kind == ExArrayLit && target.cat == TcDynArray && t.cat == TcDynArray && ck_assignable(target, t)) {
+        e.rtype = type_to_node(target);
+        return target;
+    }
     return t;
 }
 
@@ -579,6 +592,50 @@ Type* ck_call(Checker* c, Expr* e) {
             return ty(TcFloat, "float");
         }
 
+        // string + file built-ins (the same set D-- provides)
+        if (name == "substr") {
+            if (e.items.len != 3) { ck_error(c, e.line, e.col, "substr(s, start, len) takes 3 arguments"); }
+            else {
+                Type* s = ck_expr(c, e.items[0]);
+                Type* a = ck_expr(c, e.items[1]);
+                Type* n = ck_expr(c, e.items[2]);
+                if (s.cat != TcStr && !t_is_unknown(s)) { ck_error(c, e.items[0].line, e.items[0].col, "substr expects a string, got " + t_str(s)); }
+                if (!t_is_integer(a) && !t_is_unknown(a)) { ck_error(c, e.items[1].line, e.items[1].col, "substr start must be an integer, got " + t_str(a)); }
+                if (!t_is_integer(n) && !t_is_unknown(n)) { ck_error(c, e.items[2].line, e.items[2].col, "substr length must be an integer, got " + t_str(n)); }
+            }
+            return ty(TcStr, "string");
+        }
+        if (name == "int_to_str") {
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, "int_to_str(n) takes 1 argument"); }
+            else {
+                Type* n = ck_expr(c, e.items[0]);
+                if (!t_is_integer(n) && !t_is_unknown(n)) { ck_error(c, e.items[0].line, e.items[0].col, "int_to_str expects an integer, got " + t_str(n)); }
+            }
+            return ty(TcStr, "string");
+        }
+        if (name == "read_file" || name == "cstr") {
+            if (e.items.len != 1) { ck_error(c, e.line, e.col, name + "() takes 1 argument"); }
+            else {
+                Type* p = ck_expr(c, e.items[0]);
+                if (p.cat != TcStr && !t_is_unknown(p)) { ck_error(c, e.items[0].line, e.items[0].col, name + " expects a string, got " + t_str(p)); }
+            }
+            return ty(TcStr, "string");
+        }
+        if (name == "args") {
+            if (e.items.len != 0) { ck_error(c, e.line, e.col, "args() takes no arguments"); }
+            return ty_dynarr(ty(TcStr, "string"));
+        }
+        if (name == "write_file") {
+            if (e.items.len != 2) { ck_error(c, e.line, e.col, "write_file(path, data) takes 2 arguments"); }
+            else {
+                for (int i = 0; i < 2; i++) {
+                    Type* a = ck_expr(c, e.items[i]);
+                    if (a.cat != TcStr && !t_is_unknown(a)) { ck_error(c, e.items[i].line, e.items[i].col, "write_file expects strings, got " + t_str(a)); }
+                }
+            }
+            return ty(TcBool, "bool");
+        }
+
         // alloc(value) -> boxes any value in the global heap, returns a pointer to it
         if (name == "alloc") {
             if (e.items.len != 1) { ck_error(c, e.line, e.col, "alloc(value) takes exactly one argument"); return ty(TcUnknown, "?"); }
@@ -690,7 +747,7 @@ Type* ck_call(Checker* c, Expr* e) {
             int k = e.items.len;
             if (np < k) { k = np; }
             for (int i = 0; i < k; i++) {
-                Type* at = ck_expr(c, e.items[i]);
+                Type* at = ck_expr_as(c, e.items[i], c.funcs[fi].params[i]);
                 if (!ck_assignable(c.funcs[fi].params[i], at)) {
                     ck_error(c, e.items[i].line, e.items[i].col, "argument " + int_to_str(i + 1) + " to '" + name + "' expects " + t_str(c.funcs[fi].params[i]) + ", got " + t_str(at));
                 }
@@ -726,7 +783,7 @@ void ck_stmt(Checker* c, Stmt* s) {
                 Type* declared = ty(TcUnknown, "?");
                 if (s.type != null) { declared = ck_type(c, s.type); }
                 if (s.init != null) {
-                    Type* vt = ck_expr(c, s.init);
+                    Type* vt = ck_expr_as(c, s.init, declared);
                     if (s.type == null) {
                         declared = vt;
                         s.type = type_to_node(vt);   // write inference back for codegen
@@ -743,7 +800,7 @@ void ck_stmt(Checker* c, Stmt* s) {
         case StReturn:
             {
                 if (s.expr != null) {
-                    Type* vt = ck_expr(c, s.expr);
+                    Type* vt = ck_expr_as(c, s.expr, c.cur_ret);
                     if (c.cur_ret.cat == TcVoid) { ck_error(c, s.line, s.col, "returning a value from a void function"); }
                     else if (!ck_assignable(c.cur_ret, vt)) { ck_error(c, s.line, s.col, "returning " + t_str(vt) + " from a function declared to return " + t_str(c.cur_ret)); }
                 } else {
@@ -758,7 +815,7 @@ void ck_stmt(Checker* c, Stmt* s) {
                 if (!lv.ok) { ck_error(c, s.line, s.col, "left side of '" + s.op + "' is not assignable"); }
                 else if (lv.is_const) { ck_error(c, s.line, s.col, "cannot assign to a const variable"); }
                 Type* tt = ck_expr(c, s.target);
-                Type* vt = ck_expr(c, s.value);
+                Type* vt = ck_expr_as(c, s.value, tt);
                 if (tt.cat == TcVec && s.op != "=") {
                     // vector compound-assign: += / -= need a matching vector; *= a vector or scalar
                     if (s.op == "+=" || s.op == "-=") {
@@ -913,5 +970,5 @@ Checker* new_checker(str file) {
     FuncInfo[]   fs = [];
     str[]        es = [];
     EnumMember[] ems = [];
-    return new Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void") };
+    return new Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void"), null };
 }

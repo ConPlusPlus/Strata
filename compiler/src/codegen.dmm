@@ -35,6 +35,8 @@ str cg_escape(str s) {     // re-escape a decoded string/char for a C literal
         else if (c == '\n') { r = r + "\\n"; }
         else if (c == '\t') { r = r + "\\t"; }
         else if (c == '\r') { r = r + "\\r"; }
+        else if (c == '\'') { r = r + "\\'"; }
+        else if (c == '\0') { r = r + "\\000"; }   // 3-digit octal: a following digit can't extend it
         else                { r = r + substr(s, i, 1); }
     }
     return r;
@@ -146,6 +148,13 @@ str gen_call(Codegen* cg, Expr* e) {
             if (e.items[0].rtype != null) { ct = ty_to_c(e.items[0].rtype); }
             return "({ " + ct + " _v = " + gen_expr(cg, e.items[0]) + "; " + ct + "* _p = (" + ct + "*)arena_alloc(strata_heap(), sizeof(" + ct + ")); *_p = _v; _p; })";
         }
+        // string + file built-ins
+        if (nm == "substr" && e.items.len == 3) { return "str_sub(" + gen_expr(cg, e.items[0]) + ", " + gen_expr(cg, e.items[1]) + ", " + gen_expr(cg, e.items[2]) + ")"; }
+        if (nm == "int_to_str" && e.items.len == 1) { return "str_from_int(" + gen_expr(cg, e.items[0]) + ")"; }
+        if (nm == "read_file" && e.items.len == 1) { return "strata_read_file(" + gen_expr(cg, e.items[0]) + ")"; }
+        if (nm == "write_file" && e.items.len == 2) { return "strata_write_file(" + gen_expr(cg, e.items[0]) + ", " + gen_expr(cg, e.items[1]) + ")"; }
+        if (nm == "args" && e.items.len == 0) { return "strata_args()"; }
+        if (nm == "cstr" && e.items.len == 1) { return "(" + gen_expr(cg, e.items[0]) + ")"; }   // string already IS a C string
         // prelude helpers
         if (nm == "min" && e.items.len == 2) { return "sp_min(" + gen_expr(cg, e.items[0]) + ", " + gen_expr(cg, e.items[1]) + ")"; }
         if (nm == "max" && e.items.len == 2) { return "sp_max(" + gen_expr(cg, e.items[0]) + ", " + gen_expr(cg, e.items[1]) + ")"; }
@@ -407,6 +416,7 @@ str generate(Codegen* cg, Program prog) {
     cg.out = cg.out + "#include <arena.h>\n";
     cg.out = cg.out + "#include <smath.h>\n";
     cg.out = cg.out + "#include <sstr.h>\n";
+    cg.out = cg.out + "#include <sio.h>\n";
     cg.out = cg.out + "#include <sarr.h>\n";
     cg.out = cg.out + "#include <sprelude.h>\n";
 
@@ -465,7 +475,8 @@ str generate(Codegen* cg, Program prog) {
     }
 
     // top-level code = main
-    cg.out = cg.out + "int main(void) {\n";
+    cg.out = cg.out + "int main(int strata_argc_, char** strata_argv_) {\n";
+    cg.out = cg.out + "    strata_set_args(strata_argc_, strata_argv_);\n";
     for (int i = 0; i < prog.main.len; i++) { gen_stmt(cg, 1, prog.main[i]); }
     cg.out = cg.out + "    return 0;\n}\n";
     return cg.out;

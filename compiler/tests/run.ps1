@@ -50,6 +50,35 @@ Get-ChildItem -Path $here -Directory | ForEach-Object {
     }
 }
 
+# --- self-hosting: the Strata-written compiler must match the D-- one ------------
+# Build selfhost/stratac.strata with the D-- stratac, then require byte-identical output
+# for every stage it has been ported to, over every example and compiler source file.
+$selfhost = Join-Path $compiler "selfhost"
+$selfsrc  = Join-Path $selfhost "stratac.strata"
+& $strata build $selfsrc | Out-Null
+if (-not $?) {
+    Write-Host "FAIL  selfhost build" -ForegroundColor Red
+    $fail++
+} else {
+    $selfexe = Join-Path $selfhost "stratac.exe"
+    $inputs  = @(Get-ChildItem $examples -Filter *.strata) + @(Get-ChildItem $selfhost -Filter *.strata) + @(Get-ChildItem $src -Include *.dmm,*.hmm -Recurse)
+    foreach ($stage in @("tokens")) {
+        $bad = @()
+        foreach ($f in $inputs) {
+            $want = (& $strata  $stage $f.FullName) -join "`n"
+            $got  = (& $selfexe $stage $f.FullName) -join "`n"
+            if ($want -ne $got) { $bad += $f.Name }
+        }
+        if ($bad.Count -eq 0) {
+            Write-Host "PASS  selfhost/$stage  ($($inputs.Count) files identical)" -ForegroundColor Green
+            $pass++
+        } else {
+            Write-Host "FAIL  selfhost/$stage  differs on: $($bad -join ', ')" -ForegroundColor Red
+            $fail++
+        }
+    }
+}
+
 Write-Host ""
 Write-Host "$pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }

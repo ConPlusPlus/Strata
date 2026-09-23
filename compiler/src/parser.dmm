@@ -24,7 +24,13 @@ struct Parser {
     int     pos;
     bool    had_error;
     bool    no_brace;   // when true, `Ident {` is NOT a struct literal (control headers)
+    // the FIRST parse error (later ones are usually knock-on effects)
+    int     err_line;
+    int     err_col;
+    str     err_msg;
 }
+
+Parser new_parser(Token[] toks) { return Parser{ toks, 0, false, false, 0, 0, "" }; }
 
 // ---- cursor ------------------------------------------------------------
 
@@ -46,13 +52,29 @@ bool p_match(Parser* p, TokKind k) {
     if (p_check(p, k)) { p_advance(p); return true; }
     return false;
 }
+// Describe a token for an error message: `Ident 'foo'`, `'('`, `NEWLINE`.
+str tok_desc(Token t) {
+    if (t.kind == TkIdent || t.kind == TkInt || t.kind == TkFloat) { return kind_name(t.kind) + " '" + t.text + "'"; }
+    if (t.kind == TkString)  { return "a string literal"; }
+    if (t.kind == TkChar)    { return "a char literal"; }
+    if (t.kind == TkNewline || t.kind == TkEof || t.kind == TkError) { return kind_name(t.kind); }
+    return "'" + kind_name(t.kind) + "'";
+}
+// Record a parse error at token t (only the first is kept - see Parser.err_*).
+void p_error(Parser* p, Token t, str msg) {
+    if (!p.had_error) { p.err_line = t.line; p.err_col = t.col; p.err_msg = msg; }
+    p.had_error = true;
+}
+void p_unexpected(Parser* p) { p_error(p, p_peek(p), "unexpected " + tok_desc(p_peek(p))); }
+
 Token p_expect(Parser* p, TokKind k) {
     if (p_check(p, k)) { return p_advance(p); }
-    p.had_error = true;
+    p_error(p, p_peek(p), "expected '" + kind_name(k) + "', got " + tok_desc(p_peek(p)));
     return p_peek(p);
 }
+// Statement separators: newlines, and optional `;` (so `{ a; b }` fits on one line).
 void skip_newlines(Parser* p) {
-    while (p_check(p, TkNewline)) { p_advance(p); }
+    while (p_check(p, TkNewline) || p_check(p, TkSemicolon)) { p_advance(p); }
 }
 
 // ---- types -------------------------------------------------------------
@@ -139,7 +161,7 @@ Decl* import_decl(Parser* p) {
         d.path = path;
         d.is_system = true;
     } else {
-        p.had_error = true;
+        p_unexpected(p);
     }
     return d;
 }
@@ -218,13 +240,13 @@ Program parse_program(Parser* p) {
         if (p_check(p, TkKwStruct))     { Decl* d = struct_decl(p); d.is_exported = exported; decls.push(d); }
         else if (p_check(p, TkKwEnum))  { Decl* d = enum_decl(p);   d.is_exported = exported; decls.push(d); }
         else if (looks_like_func(p))    { Decl* d = func_decl(p);   d.is_exported = exported; decls.push(d); }
-        else if (exported)              { p.had_error = true; p_advance(p); }   // `export` must precede a decl
+        else if (exported)              { p_error(p, p_peek(p), "'export' must precede a declaration"); p_advance(p); }
         else if (p_check(p, TkKwImport)) { decls.push(import_decl(p)); }
         else if (p_check(p, TkKwLink))  { decls.push(link_decl(p)); }
         else {
             int before = p.pos;
             main.push(statement(p));
-            if (p.pos == before) { p.had_error = true; p_advance(p); }
+            if (p.pos == before) { p_unexpected(p); p_advance(p); }
         }
         skip_newlines(p);
     }
@@ -240,7 +262,7 @@ Stmt* block(Parser* p) {
     while (!p_check(p, TkRBrace) && !p_at_end(p)) {
         int before = p.pos;
         b.stmts.push(statement(p));
-        if (p.pos == before) { p.had_error = true; p_advance(p); }
+        if (p.pos == before) { p_unexpected(p); p_advance(p); }
         skip_newlines(p);
     }
     p_expect(p, TkRBrace);
@@ -278,7 +300,7 @@ Stmt* expr_or_assign_core(Parser* p) {
 Stmt* return_stmt(Parser* p) {
     Token kw = p_advance(p);
     Stmt* s = new_stmt(StReturn, kw.line, kw.col);
-    if (!p_check(p, TkNewline) && !p_check(p, TkRBrace) && !p_at_end(p)) {
+    if (!p_check(p, TkNewline) && !p_check(p, TkSemicolon) && !p_check(p, TkRBrace) && !p_at_end(p)) {
         s.expr = expression(p);
     }
     return s;
@@ -351,7 +373,7 @@ Stmt* switch_stmt(Parser* p) {
             bool more = true;
             while (more) { vals.push(expression(p)); more = p_match(p, TkComma); }
         } else {
-            p.had_error = true;
+            p_error(p, p_peek(p), "expected 'case' or 'default', got " + tok_desc(p_peek(p)));
             return s;
         }
         p_expect(p, TkColon);
@@ -360,7 +382,7 @@ Stmt* switch_stmt(Parser* p) {
         while (!p_check(p, TkKwCase) && !p_check(p, TkKwDefault) && !p_check(p, TkRBrace) && !p_at_end(p)) {
             int before = p.pos;
             body.stmts.push(statement(p));
-            if (p.pos == before) { p.had_error = true; p_advance(p); }
+            if (p.pos == before) { p_unexpected(p); p_advance(p); }
             skip_newlines(p);
         }
         s.cases.push(SwitchCase{ vals, body, is_def, ct.line, ct.col });
@@ -595,7 +617,7 @@ Expr* primary(Parser* p) {
                 return e;
             }
         default:
-            p.had_error = true;
+            p_error(p, t, "expected an expression, got " + tok_desc(t));
             p_advance(p);
             return new_expr(ExName, t.line, t.col);
     }

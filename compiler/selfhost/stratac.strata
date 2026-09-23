@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
+// selfhost/stratac.strata - the Strata compiler driver, written in Strata (the
+// self-hosting port of src/stratac.dmm). Grows one stage at a time as modules are
+// ported; each stage is validated byte-for-byte against the D-- build.
+//
+//   stratac tokens <file.strata>   print the token stream
+
+import dump
+import <stdlib.h>
+
+var argv = args()
+if argv.len < 3 {
+    print("usage: stratac tokens <file.strata>")
+    exit(2)
+}
+string cmd  = argv[1]
+string path = argv[2]
+if cmd == "tokens" {
+    print_tokens(lex(read_file(path)))
+} else {
+    print("unknown command: " + cmd)
+    exit(2)
+}

@@ -13,6 +13,7 @@
 #define STRATA_SSTR_H
 
 #include <string.h>
+#include <stdio.h>
 #include <arena.h>
 
 static Arena strata_str_arena_v;
@@ -30,5 +31,26 @@ static inline const char* str_concat(const char* x, const char* y) {
 }
 static inline int      str_eq(const char* x, const char* y) { return strcmp(x, y) == 0; }
 static inline long long str_len(const char* x) { return (long long)strlen(x); }
+
+/* substr(s, start, n): n bytes from `start`, clamped to the string's bounds. */
+static inline const char* str_sub(const char* s, long long start, long long n) {
+    long long len = (long long)strlen(s);
+    if (start < 0) start = 0;
+    if (start > len) start = len;
+    if (n < 0) n = 0;
+    if (start + n > len) n = len - start;
+    char* r = (char*)arena_alloc(strata_str_arena(), (size_t)n + 1);
+    memcpy(r, s + start, (size_t)n); r[n] = '\0';
+    return r;
+}
+
+/* int_to_str(n): decimal text of an integer. */
+static inline const char* str_from_int(long long v) {
+    char tmp[32];
+    int n = snprintf(tmp, sizeof tmp, "%lld", v);
+    char* r = (char*)arena_alloc(strata_str_arena(), (size_t)n + 1);
+    memcpy(r, tmp, (size_t)n + 1);
+    return r;
+}
 
 #endif /* STRATA_SSTR_H */

@@ -28,7 +28,7 @@ int main(str[] args) {
 
     print("");
     print("=== AST ===");
-    Parser p = Parser{ toks, 0, false, false };
+    Parser p = new_parser(toks);
     Program prog = parse_program(&p);
     if (p.had_error) { print("(parse error)"); return 1; }
     print_program(prog);

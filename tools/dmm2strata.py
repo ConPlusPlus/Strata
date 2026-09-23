@@ -41,13 +41,17 @@ def split_comment(line):
 def convert_include(line):
     # #include "foo.dmm" / "foo.hmm"  ->  import foo   (Strata module)
     # #include <foo.h>               ->  import <foo.h> (C header, kept)
-    m = re.match(r'\s*#include\s+"([\w./]+)\.(?:dmm|hmm|dm)"\s*$', line)
+    # A trailing // comment is kept, moved to its own line above (the driver's module
+    # import must be alone on its line).
+    code, _, comment = split_comment(line)
+    lead = comment.strip() + '\n' if comment.strip() else ''
+    m = re.match(r'\s*#include\s+"([\w./]+)\.(?:dmm|hmm|dm)"\s*$', code)
     if m:
         mod = os.path.splitext(os.path.basename(m.group(1)))[0]
-        return f'import {mod}'
-    m = re.match(r'(\s*)#include\s+(<[\w./]+>)\s*$', line)
+        return f'{lead}import {mod}'
+    m = re.match(r'(\s*)#include\s+(<[\w./]+>)\s*$', code)
     if m:
-        return f'{m.group(1)}import {m.group(2)}'
+        return f'{m.group(1)}import {m.group(2)}' + (('   ' + comment) if comment else '')
     return line
 
 def convert_new(line):
@@ -65,6 +69,7 @@ def convert_words(line):
     code, _, comment = split_comment(line)
     code = re.sub(r'\bauto\b', 'var', code)
     code = re.sub(r'\bstr\b', 'string', code)   # \b keeps substr/int_to_str/cstr safe
+    code = re.sub(r'(\w\*?)\[\]', r'\1[dynamic]', code)   # D-- T[] grows == Strata T[dynamic]
     return code + comment
 
 # --- things Strata can't do yet / too risky to auto-convert: flag them --------
@@ -88,14 +93,13 @@ def flags_for(line):
 def translate(text):
     out = []
     for raw in text.split('\n'):
-        line = raw
-        notes = flags_for(line)
-        line = convert_include(line)
+        line = convert_include(raw)
         if not line.lstrip().startswith('import'):
             line = convert_new(line)
             line = convert_for(line)
             line = convert_words(line)
             line = strip_line_terminator(line)
+        notes = flags_for(line)   # flag what the transforms could NOT handle
         if notes:
             out.append('// TODO(port): ' + '; '.join(notes))
         out.append(line)
@@ -104,4 +108,5 @@ def translate(text):
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         sys.stderr.write('usage: dmm2strata.py <file.dmm|.hmm>\n'); sys.exit(2)
+    sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     sys.stdout.write(translate(open(sys.argv[1], encoding='utf-8').read()))

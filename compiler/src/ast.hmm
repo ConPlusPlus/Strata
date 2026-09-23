@@ -12,6 +12,8 @@
 //   * Program carries top-level statements (`main`) as well as decls, because
 //     top-level code = the entry point (DESIGN sec 2).
 
+#include "srcmap.hmm"   // diagnostics map combined-source lines back to files
+
 // ---- types -------------------------------------------------------------
 
 enum TypeKind { TyNamed, TyArray, TyFixedArray, TyPointer, TyDynArray }

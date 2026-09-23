@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 0.15.0** · tests: **17/17** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 0.16.0** · tests: **18/18** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -36,7 +36,7 @@ self-hosting, C-compiling language (in `C:\DMinusMinus`). The long-term plan is 
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v0.15.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v0.16.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -49,6 +49,7 @@ Strata/
 │  ├─ install.ps1         install the toolchain + add to PATH
 │  ├─ package.ps1         build a release .zip into dist/
 │  ├─ src/                the compiler, written in D-- (see §4)
+│  ├─ selfhost/           the compiler being ported to Strata (see §9)
 │  ├─ lib/                the RUNTIME the compiled programs link against (see §7)
 │  ├─ examples/           sample .strata programs (see §8)
 │  ├─ tests/              golden-file tests + run.ps1 (see §6)
@@ -133,7 +134,8 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 
 ## 5. The language today (what's implemented)
 
-**Feel:** types-first (C#-like), `var` inference, newline-terminated (no `;`), braces for
+**Feel:** types-first (C#-like), `var` inference, newline-terminated (`;` optional, as a
+separator for several statements on one line), braces for
 blocks, paren-free control flow. Source files: `.strata` (canonical) / `.str` (alias).
 
 **Types:** `int` (=i64), `float` (=f32), `bool`, `char`, `string` (a C `const char*`),
@@ -164,7 +166,11 @@ global heap → pointer), `null`. `.` auto-dereferences pointers.
 **Casts & sizes:** `cast<T>(x)` (scalar↔scalar, pointer↔pointer, pointer↔int; anything
 else is a checker error) and `sizeof(T)` (an `int`). Both are keywords.
 
-**Strings:** `+` (concat), `.len`, `==`/`!=`.
+**Strings:** `+` (concat), `.len`, `==`/`!=`, indexing `s[i]` (a `char`), and built-ins
+`substr(s, start, len)`, `int_to_str(n)`, `cstr(s)`.
+
+**Files & process:** `read_file(path)` ("" on failure), `write_file(path, data)` (bool),
+`args()` (the command line, `string[dynamic]`).
 
 **Dynamic arrays:** literals `[a, b, c]`, `.push(v)`, `.len`, indexing (incl. lvalue
 `xs[i].field = ...`), `for x in xs`.
@@ -186,7 +192,10 @@ public (currently advisory — not yet enforced).
 
 Golden-file tests in `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
 against `stratac <stage> examples/<name>.strata`. `run.ps1` rebuilds the compiler and runs
-all of them. **17 passing** across stages `tokens`, `ast`, `check`, `run`. GUI examples
+all of them. **18 passing**: 17 goldens across stages `tokens`, `ast`, `check`, `run`, plus
+the **self-hosting check**: it builds `selfhost/stratac.strata` and requires its output to be
+byte-identical to the D-- build for every ported stage over all examples + compiler sources.
+GUI examples
 (`window`, `sprite`, `balls`) are built in the packaging step but not golden-run (they open
 windows). Add a golden by dropping the expected output in the right `tests/<stage>/` folder.
 
@@ -201,7 +210,8 @@ Header-only C the *compiled program* links against (not the compiler). Carries t
 |---|---|
 | `arena.h` | the arena/region allocator + the global heap for `alloc` (`strata_heap`) |
 | `smath.h` | `vec2/3/4`, `mat4`, `quat` and their operations |
-| `sstr.h` | string concat/eq/len (a lazy global string arena) |
+| `sstr.h` | string concat/eq/len/`substr`/`int_to_str` (a lazy global string arena) |
+| `sio.h` | `read_file`, `write_file`, `args()` |
 | `sarr.h` | the type-erased dynamic array (`Array`) |
 | `sprelude.h` | prelude helpers (`sp_min`/`max`/`clamp`/`lerp`, `SP_PI`) |
 
@@ -219,18 +229,31 @@ alloc+null), `casts` (`cast<T>`/`sizeof`), `prelude`, `modules`+`greetlib` (impo
 
 ## 9. What we're doing now / next
 
-**Done in v0.15.0: `cast<T>(x)` + `sizeof(T)`** — the two features `tools/dmm2strata.py`
-flagged as missing. The path to self-hosting is clear.
+**In progress: self-hosting `stratac` in Strata** (`compiler/selfhost/`).
 
-**Next: self-host `stratac` in Strata** — the big one. Token-efficient plan:
-1. Run `tools/dmm2strata.py` on each `compiler/src/*.dmm` (it does the safe transforms:
-   `;` removal, `#include`→`import`, `new T{...}`→`alloc(T{...})`, `auto`→`var`,
-   `str`→`string`, the counting `for` idiom) — bulk conversion at ~zero LLM cost.
-2. Hand-fix the `// TODO(port):` residue **one module at a time** (lexer first, it's
-   smallest/self-contained).
-3. Compile the Strata-written `stratac` with the D-- one; then compile it with itself; when
-   the output is byte-identical, self-hosting is achieved (the fixpoint — how D-- did it).
-4. Freeze the D-- bootstrap.
+| Module | Status |
+|---|---|
+| `token`, `lexer` | ✅ ported (v0.16.0), `tokens` output byte-identical on 33 files |
+| `dump` | token printer ported; AST printer next (needs `ast`) |
+| `srcmap`, `ast`, `parser` | **next** → enables the `ast` stage |
+| `checker`, `codegen` | then → `check` / `emit` stages |
+| `stratac` driver | grows per stage (only `tokens` today) |
+
+The loop for each module:
+1. `python tools/dmm2strata.py compiler/src/<m>.dmm > compiler/selfhost/<m>.strata`.
+   It strips `;`, turns `#include` into `import`, `new T{...}` into `alloc(T{...})`,
+   `auto` into `var`, `str` into `string` and `T[]` into `T[dynamic]`, and converts the
+   counting `for` idiom. Only 1 line in the whole compiler is still flagged `TODO(port)`.
+2. `stratac check` it and fix what fails. **Prefer fixing Strata or the translator over
+   hand-editing the port**, so the port stays a mechanical copy of the D-- source. So far
+   every failure has been a real Strata gap or bug, not a porting problem.
+3. Add the stage to `selfhost/stratac.strata` and to the stage list in `tests/run.ps1`.
+
+**Endgame:** when every stage matches, compile `selfhost/` with *itself* and check the
+output is byte-identical (the fixpoint, as D-- did). Then freeze the D-- bootstrap.
+
+**Keep `src/` and `selfhost/` in sync:** until the switch-over, changes to `src/*.dmm`
+must be re-translated (or mirrored) into `selfhost/`; the self-hosting test catches drift.
 
 ---
 
@@ -272,6 +295,9 @@ flagged as missing. The path to self-hosting is clear.
 - **GUI examples block** (a window stays open until closed) — don't run them in an
   automated/headless step; `stratac build` them instead.
 - **Line endings:** goldens are LF; the PowerShell test runner normalizes CRLF/LF.
+- **Strata strings are NUL-terminated C strings**, unlike D--'s (pointer, length) strings. A
+  string can't hold a `\0` byte, and `.len` is `strlen` (O(n)). This hasn't mattered
+  for the port yet, but a decoded `"\0"` escape in a Strata-built compiler will lose the byte.
 
 ---
 

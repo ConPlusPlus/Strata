@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
+// src/dump.dmm - human-readable rendering of the core's data (tokens + AST).
+//
+// A shared FRONT-END utility, not part of the compiler core: it consumes core data and
+// turns it into text. Both the `strata` CLI and the `console` include this, so the
+// rendering lives in one place (ARCHITECTURE.md: one core, many faces).
+
+import lexer   // TEMP: the AST half of dump (which needs core) is not ported yet
+
+// ============================ token printing ============================
+
+bool is_text_kind(TokKind k) {
+    switch (k) {
+        case TkIdent, TkInt, TkFloat, TkString, TkChar: return true
+        default: return false
+    }
+    return false
+}
+
+string pad_left(string s, int w)  { string r = s; while (r.len < w) { r = " " + r; } return r; }
+string pad_right(string s, int w) { string r = s; while (r.len < w) { r = r + " "; } return r; }
+
+void print_token(Token t) {
+    string loc  = pad_left(int_to_str(t.line), 3) + ":" + pad_right(int_to_str(t.col), 3)
+    string name = kind_name(t.kind)
+    if (is_text_kind(t.kind)) { print(loc + "  " + pad_right(name, 8) + "  " + t.text); }
+    else                      { print(loc + "  " + name); }
+}
+
+void print_tokens(Token[dynamic] toks) {
+    for i in 0..toks.len { print_token(toks[i]); }
+}

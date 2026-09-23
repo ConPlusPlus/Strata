@@ -11,6 +11,10 @@ compiler/src/*.exe
 compiler/examples/*.c
 compiler/examples/*.exe
 
+# stratac output beside the self-hosted (Strata-written) compiler
+compiler/selfhost/*.c
+compiler/selfhost/*.exe
+
 # build output directory (stratac.exe, console.exe, libstrata.dll, libstrata.c)
 compiler/bin/
 

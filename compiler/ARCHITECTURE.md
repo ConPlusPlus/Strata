@@ -64,6 +64,7 @@ compiler/
 ├─ bin/                 build output: stratac.exe, console.exe, libstrata.dll
 ├─ lib/                 the C runtime the OUTPUT links against (arena.h, math, prelude)
 ├─ examples/            sample .strata programs
+├─ selfhost/            the compiler being ported to Strata (tested against src/)
 └─ tests/              golden-file tests, one dir per stage (tokens/, ast/, ...)
 ```
 
