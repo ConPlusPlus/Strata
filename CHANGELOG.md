@@ -8,6 +8,19 @@ GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [0.15.0] - 2026-09-22
+### Added
+- **`cast<T>(x)`** — explicit conversion: between scalars (`int`/sized ints/`float`/
+  `char`/`bool`/enums) and involving pointers (pointer↔pointer, pointer↔int). Other
+  casts (e.g. `cast<vec3>(5)`) are a checker error. Lowers to a C cast.
+- **`sizeof(T)`** — the size of any type in bytes, as an `int`.
+- These were the last two features `tools/dmm2strata.py` flagged as missing for
+  self-hosting. Example: `examples/casts.strata`.
+### Fixed
+- Sized numeric types (`i8`..`u64`, `uint`, `f32`, `f64`) now map to their C types
+  (`int32_t`, `uint8_t`, `double`, ...) instead of leaking their Strata names into the C,
+  and `var` inference keeps the sized type rather than collapsing it to `int`/`float`.
+
 ## [0.14.0] - 2026-09-22
 ### Added
 - **`alloc(value)`** — boxes any value in a global heap and returns a pointer to it

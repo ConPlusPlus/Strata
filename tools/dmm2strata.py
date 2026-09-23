@@ -70,8 +70,6 @@ def convert_words(line):
 # --- things Strata can't do yet / too risky to auto-convert: flag them --------
 
 FLAGS = [
-    (r'\bcast\s*<',        'cast<T>(x) - Strata has no cast yet'),
-    (r'\bsizeof\b',        'sizeof - not exposed in Strata yet'),
     (r'\bfn\s*\(',         'fn(...) function-pointer type - not in Strata'),
     (r'\bglobal\b',        'global - not in Strata'),
     (r'\bextern\b',        'extern - use import/link in Strata'),

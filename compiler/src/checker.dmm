@@ -62,8 +62,8 @@ TypeNode* named_node(str n) { TypeNode* t = new_type(TyNamed, 0, 0); t.name = n;
 TypeNode* type_to_node(Type* t) {
     if (t == null) { return null; }
     switch (t.cat) {
-        case TcInt:     return named_node("int");
-        case TcFloat:   return named_node("float");
+        case TcInt:     return named_node(t.name);   // "int", a sized int, or an enum name
+        case TcFloat:   return named_node(t.name);
         case TcBool:    return named_node("bool");
         case TcChar:    return named_node("char");
         case TcStr:     return named_node("string");
@@ -208,6 +208,18 @@ bool ck_assignable(Type* target, Type* value) {
             return target.elem != null && value.elem != null && ck_assignable(target.elem, value.elem);
         default: return false;
     }
+    return false;
+}
+
+// Can a value of type `from` be converted with cast<to>(...)? Same types always; any
+// scalar to any scalar; pointer to pointer; pointer <-> integer.
+bool t_is_scalar(Type* t) { return t.cat == TcInt || t.cat == TcFloat || t.cat == TcChar || t.cat == TcBool; }
+bool ck_castable(Type* from, Type* to) {
+    if (t_is_unknown(from) || t_is_unknown(to)) { return true; }
+    if (ck_assignable(to, from)) { return true; }
+    if (t_is_scalar(from) && t_is_scalar(to)) { return true; }
+    if (from.cat == TcPointer && (to.cat == TcPointer || to.cat == TcInt)) { return true; }
+    if (to.cat == TcPointer && from.cat == TcInt) { return true; }
     return false;
 }
 
@@ -471,6 +483,24 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 }
                 for (int i = k; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
                 return ty(TcStruct, e.type_name);
+            }
+
+        case ExCast:
+            {
+                // cast<T>(x): an explicit conversion between scalars (int/float/char/bool/
+                // enum) or involving a pointer (ptr<->ptr, ptr<->int). The escape hatch.
+                Type* from = ck_expr(c, e.a);
+                Type* to   = ck_type(c, e.type);
+                if (!ck_castable(from, to)) {
+                    ck_error(c, e.line, e.col, "cannot cast " + t_str(from) + " to " + t_str(to));
+                }
+                return to;
+            }
+
+        case ExSizeof:
+            {
+                ck_type(c, e.type);   // validates the type; error if unknown
+                return ty(TcInt, "int");
             }
 
         default:

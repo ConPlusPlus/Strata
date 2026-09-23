@@ -516,6 +516,32 @@ Expr* postfix(Parser* p) {
 
 Expr* primary(Parser* p) {
     Token t = p_peek(p);
+
+    if (t.kind == TkKwCast) {
+        // cast<T>(expr): an explicit conversion (the manual-control escape hatch)
+        p_advance(p);                 // cast
+        Expr* cx = new_expr(ExCast, t.line, t.col);
+        p_expect(p, TkLt);
+        cx.type = parse_type(p);
+        p_expect(p, TkGt);
+        p_expect(p, TkLParen);
+        bool saved = p.no_brace; p.no_brace = false;
+        cx.a = expression(p);
+        p.no_brace = saved;
+        p_expect(p, TkRParen);
+        return cx;
+    }
+
+    if (t.kind == TkKwSizeof) {
+        // sizeof(T): the size in bytes of a type, as an int (for manual allocation)
+        p_advance(p);                 // sizeof
+        Expr* sz = new_expr(ExSizeof, t.line, t.col);
+        p_expect(p, TkLParen);
+        sz.type = parse_type(p);
+        p_expect(p, TkRParen);
+        return sz;
+    }
+
     switch (t.kind) {
         case TkInt:     { p_advance(p); Expr* e = new_expr(ExIntLit, t.line, t.col);    e.text = t.text; return e; }
         case TkFloat:   { p_advance(p); Expr* e = new_expr(ExFloatLit, t.line, t.col);  e.text = t.text; return e; }

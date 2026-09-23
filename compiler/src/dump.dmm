@@ -73,6 +73,8 @@ void pr_expr(int ind, Expr* e) {
         case ExIndex:     pr(ind, "Index"); pr_expr(ind + 1, e.a); pr_expr(ind + 1, e.b);
         case ExArrayLit:  pr(ind, "ArrayLit"); for (int i = 0; i < e.items.len; i++) { pr_expr(ind + 1, e.items[i]); }
         case ExStructLit: pr(ind, "StructLit " + e.type_name); for (int i = 0; i < e.items.len; i++) { pr_expr(ind + 1, e.items[i]); }
+        case ExCast:      pr(ind, "Cast " + ast_type_str(e.type)); pr_expr(ind + 1, e.a);
+        case ExSizeof:    pr(ind, "Sizeof " + ast_type_str(e.type));
         default:          pr(ind, "?expr");
     }
 }

@@ -1,0 +1,25 @@
+// casts.strata - explicit conversions with cast<T>(x) and type sizes with sizeof(T)
+// (the two escape hatches a compiler's own source leans on).
+struct Pair { int a; int b }
+enum Color { Red, Green, Blue }
+
+float f = 3.75
+print(cast<int>(f))               // 3   (float -> int truncates)
+print(cast<float>(7) / 2.0)       // 3.5 (int -> float)
+print(cast<int>('A'))             // 65  (char -> int)
+print(cast<char>(66) == 'B')      // 1
+
+Color c = cast<Color>(2)          // int -> enum
+print(c == Blue)                  // 1
+print(cast<int>(Green))           // 1
+
+print(sizeof(int))                // 8
+print(sizeof(i32))                // 4
+print(sizeof(Pair))               // 16
+print(sizeof(vec3))               // 12
+print(sizeof(Pair*) == sizeof(int*))  // 1
+
+var p = alloc(Pair{ 4, 5 })
+var raw = cast<u8*>(p)            // pointer -> pointer
+var back = cast<Pair*>(raw)
+print(back.a + back.b)            // 9

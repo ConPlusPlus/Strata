@@ -48,6 +48,17 @@ str cname(str n) {
     if (n == "void")   { return "void"; }
     if (n == "string") { return "const char*"; }
     if (n == "char")   { return "char"; }
+    // sized numerics
+    if (n == "i8")  { return "int8_t"; }
+    if (n == "i16") { return "int16_t"; }
+    if (n == "i32") { return "int32_t"; }
+    if (n == "i64") { return "int64_t"; }
+    if (n == "u8")  { return "uint8_t"; }
+    if (n == "u16") { return "uint16_t"; }
+    if (n == "u32") { return "uint32_t"; }
+    if (n == "u64" || n == "uint") { return "uint64_t"; }
+    if (n == "f32") { return "float"; }
+    if (n == "f64") { return "double"; }
     return n;
 }
 
@@ -101,7 +112,7 @@ str gen_call(Codegen* cg, Expr* e) {
         Expr* arg = e.items[0];
         if (arg.kind == ExStringLit) { return "printf(\"%s\\n\", " + gen_expr(cg, arg) + ")"; }
         if (cg_is_str_rt(arg.rtype)) { return "printf(\"%s\\n\", " + gen_expr(cg, arg) + ")"; }
-        if (arg.rtype != null && arg.rtype.kind == TyNamed && arg.rtype.name == "float") {
+        if (arg.rtype != null && arg.rtype.kind == TyNamed && (arg.rtype.name == "float" || arg.rtype.name == "f32" || arg.rtype.name == "f64")) {
             return "printf(\"%g\\n\", (double)(" + gen_expr(cg, arg) + "))";
         }
         return "printf(\"%lld\\n\", (long long)(" + gen_expr(cg, arg) + "))";
@@ -241,7 +252,9 @@ str gen_expr(Codegen* cg, Expr* e) {
                 for (int i = 0; i < e.items.len; i++) { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
                 return s + "}";
             }
-        default:      cg.had_error = true; return "0";                 // ArrayLit: later
+        case ExCast:   return "((" + ty_to_c(e.type) + ")(" + gen_expr(cg, e.a) + "))";
+        case ExSizeof: return "((int64_t)sizeof(" + ty_to_c(e.type) + "))";
+        default:      cg.had_error = true; return "0";
     }
     return "0";
 }

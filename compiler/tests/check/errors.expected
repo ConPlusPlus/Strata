@@ -1,3 +1,5 @@
 errors.strata:5:9: error: function 'add' expects 2 argument(s), got 1
 errors.strata:6:9: error: '+' requires numeric operands, got int and bool
 errors.strata:7:7: error: use of undeclared name 'unknown_name'
+errors.strata:8:9: error: cannot cast int to vec3
+errors.strata:9:16: error: unknown type 'Nope'

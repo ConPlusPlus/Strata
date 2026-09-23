@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 0.14.0** · tests: **16/16** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 0.15.0** · tests: **17/17** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -36,7 +36,7 @@ self-hosting, C-compiling language (in `C:\DMinusMinus`). The long-term plan is 
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v0.14.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v0.15.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -161,6 +161,9 @@ global heap → pointer), `null`. `.` auto-dereferences pointers.
 (`v.xy`, chained), and builtins `dot`, `cross`, `length`, `normalize`,
 `mat4_translate/scale/rotate/perspective/look_at`, `quat_axis_angle/rotate/to_mat4/normalize`.
 
+**Casts & sizes:** `cast<T>(x)` (scalar↔scalar, pointer↔pointer, pointer↔int; anything
+else is a checker error) and `sizeof(T)` (an `int`). Both are keywords.
+
 **Strings:** `+` (concat), `.len`, `==`/`!=`.
 
 **Dynamic arrays:** literals `[a, b, c]`, `.push(v)`, `.len`, indexing (incl. lvalue
@@ -175,7 +178,7 @@ global heap → pointer), `null`. `.` auto-dereferences pointers.
 public (currently advisory — not yet enforced).
 
 **Designed but NOT yet implemented:** expression-bodied functions (`f(x) = expr`), default
-& named arguments, region-escape safety checking, `cast<T>` and `sizeof` (next up — see §9).
+& named arguments, region-escape safety checking.
 
 ---
 
@@ -183,7 +186,7 @@ public (currently advisory — not yet enforced).
 
 Golden-file tests in `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
 against `stratac <stage> examples/<name>.strata`. `run.ps1` rebuilds the compiler and runs
-all of them. **16 passing** across stages `tokens`, `ast`, `check`, `run`. GUI examples
+all of them. **17 passing** across stages `tokens`, `ast`, `check`, `run`. GUI examples
 (`window`, `sprite`, `balls`) are built in the packaging step but not golden-run (they open
 windows). Add a golden by dropping the expected output in the right `tests/<stage>/` folder.
 
@@ -209,18 +212,17 @@ Header-only C the *compiled program* links against (not the compiler). Carries t
 `hello` (structs + vec3 + arena, the flagship), `run1` (functions/recursion),
 `arena` (regions), `vectors`, `matrix` (mat4/quat/swizzles), `arrays` (`T[dynamic]`),
 `switch` (enums + switch), `strings`, `interop` (calling libc), `list` (linked list via
-alloc+null), `prelude`, `modules`+`greetlib` (import). Graphical (raylib): `window`,
+alloc+null), `casts` (`cast<T>`/`sizeof`), `prelude`, `modules`+`greetlib` (import). Graphical (raylib): `window`,
 `sprite` (arrow-key movement), `balls` (60 bouncing entities in a `Ball[dynamic]`).
 
 ---
 
 ## 9. What we're doing now / next
 
-**Immediate (in progress): `cast<T>(x)` + `sizeof(T)`.** The `tools/dmm2strata.py`
-translator flagged these as the two features the D-- compiler source uses that Strata
-lacks. Adding them clears the path to self-hosting.
+**Done in v0.15.0: `cast<T>(x)` + `sizeof(T)`** — the two features `tools/dmm2strata.py`
+flagged as missing. The path to self-hosting is clear.
 
-**Then: self-host `stratac` in Strata** — the big one. Token-efficient plan:
+**Next: self-host `stratac` in Strata** — the big one. Token-efficient plan:
 1. Run `tools/dmm2strata.py` on each `compiler/src/*.dmm` (it does the safe transforms:
    `;` removal, `#include`→`import`, `new T{...}`→`alloc(T{...})`, `auto`→`var`,
    `str`→`string`, the counting `for` idiom) — bulk conversion at ~zero LLM cost.

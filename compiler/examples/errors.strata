@@ -5,3 +5,5 @@ int add(int a, int b) {
 var x = add(1)
 var y = 3 + true
 print(unknown_name)
+var z = cast<vec3>(5)
+var w = sizeof(Nope)

@@ -6,7 +6,7 @@
 // (ARCHITECTURE.md sec 4: the AST is the spine, traversed by switch on `kind`).
 //
 // Strata-specific vs D--'s AST:
-//   * no ExNew/ExCast/ExSizeof, no StSwitch (those features aren't designed yet);
+//   * no ExNew (arena `.new(T)` and `alloc(v)` are calls resolved by the checker);
 //   * StForIn replaces C-style StFor: `for name in iter { }`;
 //   * `..` ranges are ExBinary with op "..";
 //   * Program carries top-level statements (`main`) as well as decls, because
@@ -34,7 +34,8 @@ TypeNode* new_type(TypeKind k, int line, int col) {
 enum ExprKind {
     ExIntLit, ExFloatLit, ExStringLit, ExCharLit, ExBoolLit,
     ExName, ExUnary, ExBinary, ExCall, ExField, ExIndex,
-    ExArrayLit, ExStructLit
+    ExArrayLit, ExStructLit,
+    ExCast, ExSizeof
 }
 
 struct Expr {
@@ -48,12 +49,13 @@ struct Expr {
     Expr*     a;          // Unary operand / Binary lhs / Call callee / Field obj / Index obj
     Expr*     b;          // Binary rhs / Index index
     Expr*[]   items;      // Call args / ArrayLit elems / StructLit args
+    TypeNode* type;       // ExCast target type / ExSizeof operand type
     TypeNode* rtype;      // resolved type, filled by the checker (null until then)
 }
 
 Expr* new_expr(ExprKind k, int line, int col) {
     Expr*[] items = [];
-    return new Expr{ k, line, col, "", "", "", false, null, null, items, null };
+    return new Expr{ k, line, col, "", "", "", false, null, null, items, null, null };
 }
 
 // ---- statements --------------------------------------------------------
