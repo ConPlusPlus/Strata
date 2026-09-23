@@ -281,6 +281,7 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 if (v.found) { return v.type; }
                 str en = ck_enum_member(c, e.text);
                 if (en != "") { return ty(TcInt, en); }
+                if (e.text == "PI") { return ty(TcFloat, "float"); }   // prelude constant
                 // unknown name: an external C symbol (e.g. a raylib constant) if a header
                 // was imported; otherwise a real error.
                 if (!c.has_foreign) { ck_error(c, e.line, e.col, "use of undeclared name '" + e.text + "'"); }
@@ -533,6 +534,18 @@ Type* ck_call(Checker* c, Expr* e) {
             if (e.items.len != 1) { ck_error(c, e.line, e.col, "print() takes exactly one argument"); }
             for (int i = 0; i < e.items.len; i++) { ck_expr(c, e.items[i]); }
             return ty(TcVoid, "void");
+        }
+
+        // prelude math builtins (always in scope)
+        if (name == "min" || name == "max") {
+            if (e.items.len != 2) { ck_error(c, e.line, e.col, name + "(a, b) takes 2 arguments"); }
+            for (int i = 0; i < e.items.len; i++) { Type* a = ck_expr(c, e.items[i]); if (!t_is_numeric(a) && !t_is_unknown(a)) { ck_error(c, e.items[i].line, e.items[i].col, name + " expects numbers, got " + t_str(a)); } }
+            return ty(TcFloat, "float");
+        }
+        if (name == "clamp" || name == "lerp") {
+            if (e.items.len != 3) { ck_error(c, e.line, e.col, name + "() takes 3 arguments"); }
+            for (int i = 0; i < e.items.len; i++) { Type* a = ck_expr(c, e.items[i]); if (!t_is_numeric(a) && !t_is_unknown(a)) { ck_error(c, e.items[i].line, e.items[i].col, name + " expects numbers, got " + t_str(a)); } }
+            return ty(TcFloat, "float");
         }
 
         // vector constructors: vecN(components...) or vecN(scalar) to splat

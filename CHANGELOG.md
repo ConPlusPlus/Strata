@@ -8,6 +8,11 @@ GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [0.12.0] - 2026-09-22
+### Added
+- **Prelude** (always in scope): `min`, `max`, `clamp`, `lerp`, and the constant `PI`.
+  (`sqrt`/`sin`/`cos` are available via `import <math.h>`.)
+
 ## [0.11.0] - 2026-09-22
 ### Added
 - **Enums** now compile to C enums (`enum State { Idle, Walk, Jump }`).
