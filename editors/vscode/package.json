@@ -1,0 +1,28 @@
+{
+  "name": "strata",
+  "displayName": "Strata Language",
+  "description": "Syntax highlighting for the Strata programming language (.strata, .str)",
+  "version": "0.17.0",
+  "publisher": "usestrata",
+  "license": "GPL-3.0-only",
+  "repository": { "type": "git", "url": "https://github.com/UseStrata/Strata" },
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "strata",
+        "aliases": ["Strata", "strata"],
+        "extensions": [".strata", ".str"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "strata",
+        "scopeName": "source.strata",
+        "path": "./syntaxes/strata.tmLanguage.json"
+      }
+    ]
+  }
+}

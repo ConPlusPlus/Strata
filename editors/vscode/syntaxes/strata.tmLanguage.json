@@ -1,0 +1,360 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Strata",
+  "scopeName": "source.strata",
+  "fileTypes": [
+    "strata",
+    "str"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#imports"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#chars"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#decl-names"
+    },
+    {
+      "include": "#cast"
+    },
+    {
+      "include": "#type-args"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#user-types"
+    },
+    {
+      "include": "#members"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.strata",
+          "match": "//.*$"
+        },
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "block-comment": {
+      "name": "comment.block.strata",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "match": "^\\s*(import)\\s+(<[^>]*>|\"[^\"]*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.strata"
+            },
+            "2": {
+              "name": "string.quoted.other.include.strata"
+            }
+          }
+        },
+        {
+          "match": "^\\s*(import)\\s+([A-Za-z_][\\w.]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.strata"
+            },
+            "2": {
+              "name": "entity.name.namespace.strata"
+            }
+          }
+        },
+        {
+          "match": "^\\s*(link)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.strata"
+            },
+            "2": {
+              "name": "string.quoted.double.strata"
+            }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.strata",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.strata",
+          "match": "\\\\[ntr0\\\\\"]"
+        },
+        {
+          "name": "invalid.illegal.escape.strata",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "chars": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.strata",
+          "match": "'(\\\\[ntr0\\\\'])'",
+          "captures": {
+            "1": {
+              "name": "constant.character.escape.strata"
+            }
+          }
+        },
+        {
+          "name": "string.quoted.single.strata",
+          "match": "'[^'\\\\]'"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.strata",
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.strata",
+          "match": "\\b0[bB][01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.strata",
+          "match": "\\b[0-9][0-9_]*(?:\\.[0-9][0-9_]*(?:[eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\\b"
+        },
+        {
+          "name": "constant.numeric.integer.strata",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "decl-names": {
+      "match": "\\b(struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "storage.type.strata"
+        },
+        "2": {
+          "name": "entity.name.type.strata"
+        }
+      }
+    },
+    "cast": {
+      "begin": "\\b(cast)\\s*(<)",
+      "end": ">",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.cast.strata"
+        },
+        "2": {
+          "name": "punctuation.definition.typeparameters.begin.strata"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.typeparameters.end.strata"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#type-name"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "type-args": {
+      "patterns": [
+        {
+          "begin": "\\b(sizeof)\\s*(\\()",
+          "end": "\\)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.sizeof.strata"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#type-name"
+            },
+            {
+              "include": "#operators"
+            }
+          ]
+        },
+        {
+          "match": "(?<=\\.)(new)\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "support.function.method.strata"
+            },
+            "2": {
+              "patterns": [
+                {
+                  "include": "#types"
+                },
+                {
+                  "include": "#type-name"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.strata",
+          "match": "\\b(if|else|while|for|in|return|switch|case|default)\\b"
+        },
+        {
+          "name": "keyword.other.region.strata",
+          "match": "\\b(region)\\b"
+        },
+        {
+          "name": "keyword.operator.sizeof.strata",
+          "match": "\\b(cast|sizeof)\\b"
+        },
+        {
+          "name": "storage.modifier.strata",
+          "match": "\\b(var|const|struct|enum|export)\\b"
+        },
+        {
+          "name": "storage.modifier.dynamic.strata",
+          "match": "(?<=\\[)\\s*dynamic\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.strata",
+          "match": "\\b(true|false|null)\\b"
+        },
+        {
+          "name": "support.constant.strata",
+          "match": "\\b(PI)\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "storage.type.strata",
+      "match": "\\b(int|uint|i8|i16|i32|i64|u8|u16|u32|u64|float|f32|f64|bool|char|string|void|vec2|vec3|vec4|mat4|quat|Arena)\\b"
+    },
+    "builtins": {
+      "match": "\\b(print|arena|alloc|args|substr|int_to_str|read_file|write_file|cstr|min|max|clamp|lerp|dot|cross|length|normalize|mat4_identity|mat4_translate|mat4_scale|mat4_rotate|mat4_perspective|mat4_look_at|quat_identity|quat_axis_angle|quat_rotate|quat_to_mat4|quat_normalize)\\b(?=\\s*\\()",
+      "captures": {
+        "1": {
+          "name": "support.function.builtin.strata"
+        }
+      }
+    },
+    "type-name": {
+      "name": "entity.name.type.strata",
+      "match": "[A-Za-z_][A-Za-z0-9_]*"
+    },
+    "user-types": {
+      "patterns": [
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=(?:\\*|\\[\\s*(?:[0-9]+|dynamic)?\\s*\\])*\\s+(?!(?:in|else|return|case|default)\\b)[A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.strata"
+            }
+          }
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=(?:\\*|\\[\\s*(?:[0-9]+|dynamic)?\\s*\\])+\\s*[)>,])",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.strata"
+            }
+          }
+        },
+        {
+          "match": "\\b([A-Z][A-Za-z0-9_]*)(?=\\s*\\{)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.strata"
+            }
+          }
+        }
+      ]
+    },
+    "functions": {
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.strata"
+        }
+      }
+    },
+    "members": {
+      "match": "(?<=\\.)\\b(new|push|len)\\b",
+      "captures": {
+        "1": {
+          "name": "support.function.method.strata"
+        }
+      }
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.range.strata",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.strata",
+          "match": "<<=|>>=|&&|\\|\\||==|!=|<=|>=|\\+=|-=|\\*=|/=|\\|=|&=|\\^=|<<|>>|[-+*/%<>=!&|^~]"
+        }
+      ]
+    }
+  }
+}
