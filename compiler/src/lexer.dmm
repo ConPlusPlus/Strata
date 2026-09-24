@@ -106,51 +106,43 @@ void skip_trivia(Lexer* l) {
 }
 
 // ---- literals ----------------------------------------------------------
+// A string/char token's text is the literal AS WRITTEN between the quotes, escapes
+// included (`a\nb`, not a decoded newline). The escapes are validated here; every
+// Strata escape (\n \t \r \0 \\ \" \') is also a C escape, so codegen emits the text
+// as-is. Keeping it raw means the compiler never holds a NUL inside a string, which
+// matters once it runs as Strata (NUL-terminated strings).
+
+bool valid_escape(char e, char quote) {
+    return e == 'n' || e == 't' || e == 'r' || e == '0' || e == '\\' || e == quote;
+}
+
+// the raw text between the quotes of the token just scanned
+str literal_body(Lexer* l) { return substr(l.src, l.start + 1, l.pos - l.start - 2); }
 
 Token string_lit(Lexer* l) {
-    str value = "";
     while (!at_end(l) && peek(l) != '"') {
         char c = peek(l);
         if (c == '\n') { return fail(l); }
         if (c == '\\') {
             advance(l);
-            char e = advance(l);
-            if (e == 'n')       { value = value + "\n"; }
-            else if (e == 't')  { value = value + "\t"; }
-            else if (e == 'r')  { value = value + "\r"; }
-            else if (e == '0')  { value = value + "\0"; }
-            else if (e == '\\') { value = value + "\\"; }
-            else if (e == '"')  { value = value + "\""; }
-            else                { return fail(l); }
+            if (at_end(l) || !valid_escape(advance(l), '"')) { return fail(l); }
         } else {
-            value = value + substr(l.src, l.pos, 1);
             advance(l);
         }
     }
     if (at_end(l)) { return fail(l); }
     advance(l);   // closing quote
-    return make_text(l, TkString, value);
+    return make_text(l, TkString, literal_body(l));
 }
 
 Token char_lit(Lexer* l) {
     if (at_end(l)) { return fail(l); }
-    str value = "";
-    int ci = l.pos;
     char c = advance(l);
     if (c == '\\') {
-        char e = advance(l);
-        if (e == 'n')        { value = value + "\n"; }
-        else if (e == 't')   { value = value + "\t"; }
-        else if (e == 'r')   { value = value + "\r"; }
-        else if (e == '0')   { value = value + "\0"; }
-        else if (e == '\\')  { value = value + "\\"; }
-        else if (e == '\'')  { value = value + "'"; }
-        else                 { return fail(l); }
-    } else {
-        value = value + substr(l.src, ci, 1);
+        if (at_end(l) || !valid_escape(advance(l), '\'')) { return fail(l); }
     }
     if (!match(l, '\'')) { return fail(l); }
-    return make_text(l, TkChar, value);
+    return make_text(l, TkChar, literal_body(l));
 }
 
 Token number(Lexer* l) {

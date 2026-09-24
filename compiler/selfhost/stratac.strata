@@ -1,21 +1,135 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/stratac.strata - the Strata compiler driver, written in Strata (the
-// self-hosting port of src/stratac.dmm). Grows one stage at a time as modules are
-// ported; each stage is validated byte-for-byte against the D-- build.
+// selfhost/stratac.strata - the Strata compiler driver (front-end #1: the CLI, `stratac`).
+// Thin: CLI + orchestration only (ARCHITECTURE.md rule #4). Pulls in the shared
+// renderer (dump.dmm), which pulls in the whole core (incl. codegen).
 //
 //   stratac tokens <file.strata>   print the token stream
 //   stratac ast    <file.strata>   parse and print the AST
+//   stratac emit   <file.strata>   print the generated C
+//   stratac build  <file.strata>   compile to a native executable
+//   stratac run    <file.strata>   compile and run
 
+// print_tokens / print_program (+ the core via core.dmm)
 import dump
-import <stdlib.h>
+import <stdlib.h>   // system()  (C header, passed through to the generated C)
+
+string stratac_version() { return "1.0.0 (self-hosted)"; }
+
+// ---- paths -------------------------------------------------------------
+
+string stem_of(string p) {
+    int dot = 0 - 1
+    int slash = 0 - 1
+    for i in 0..p.len {
+        if (p[i] == '.') { dot = i; }
+        if (p[i] == '/' || p[i] == '\\') { slash = i; }
+    }
+    if (dot >= 0 && (slash < 0 || dot > slash)) { return substr(p, 0, dot); }
+    return p
+}
 
 string basename_of(string p) {
     int slash = 0 - 1
-    for i in 0..p.len { if p[i] == '/' || p[i] == '\\' { slash = i } }
+    for i in 0..p.len { if (p[i] == '/' || p[i] == '\\') { slash = i; } }
     return substr(p, slash + 1, p.len - (slash + 1))
 }
+
+string dirname_of(string p) {
+    int slash = 0 - 1
+    for i in 0..p.len { if (p[i] == '/' || p[i] == '\\') { slash = i; } }
+    if (slash < 0) { return "."; }
+    return substr(p, 0, slash)
+}
+
+bool file_exists(string p) { return read_file(p).len > 0; }
+
+// Find the runtime lib/ (arena.h, ...) relative to the stratac executable.
+string resolve_libdir(string argv0) {
+    string dir = dirname_of(argv0)
+    if (file_exists(dir + "/lib/arena.h"))    { return dir + "/lib"; }
+    if (file_exists(dir + "/../lib/arena.h")) { return dir + "/../lib"; }
+    if (file_exists("lib/arena.h"))           { return "lib"; }
+    if (file_exists("../lib/arena.h"))        { return "../lib"; }
+    return dir + "/lib"
+}
+
+// ---- module resolution -------------------------------------------------
+// `import Name` / `import a.b.Name` pastes the contents of Name.strata / a/b/Name.strata
+// (recursively, deduplicated) into the source. C-header imports (import "x.h" /
+// import <x.h>) are left in place for codegen. Mirrors D--'s #include preprocessor.
+
+struct ModPP { string[dynamic] seen; string out; SrcMap* map; }
+
+bool mod_seen(ModPP* pp, string path) {
+    for i in 0..pp.seen.len { if (pp.seen[i] == path) { return true; } }
+    return false
+}
+
+// If `line` is a Strata module import, return the module name; else return "".
+string parse_module_import(string line) {
+    int i = 0
+    while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
+    string kw = "import"
+    if (i + kw.len > line.len) { return ""; }
+    if (substr(line, i, kw.len) != kw) { return ""; }
+    i = i + kw.len
+    if (i >= line.len || (line[i] != ' ' && line[i] != '\t')) { return ""; }   // needs a space
+    while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
+    if (i >= line.len) { return ""; }
+    char c = line[i]
+    if (c == '<' || c == '"') { return ""; }   // a C header, not a module
+    string name = ""
+    while (i < line.len && line[i] != ' ' && line[i] != '\t' && line[i] != '\r') { name = name + substr(line, i, 1); i = i + 1; }
+    return name
+}
+
+string module_to_path(string base, string name) {
+    string rel = ""
+    for i in 0..name.len { if (name[i] == '.') { rel = rel + "/"; } else { rel = rel + substr(name, i, 1); } }
+    return base + "/" + rel + ".strata"
+}
+
+void mod_line(ModPP* pp, string line, string base, string path, int lineno) {
+    string name = parse_module_import(line)
+    if (name.len > 0) {
+        string resolved = module_to_path(base, name)
+        if (!mod_seen(pp, resolved)) {
+            pp.seen.push(resolved)
+            mod_file(pp, resolved)
+        }
+    } else {
+        pp.out = pp.out + line + "\n"
+        pp.map.files.push(basename_of(path))
+        pp.map.lines.push(lineno)
+    }
+}
+
+void mod_file(ModPP* pp, string path) {
+    string src = read_file(path)
+    string base = dirname_of(path)
+    string line = ""
+    int lineno = 1
+    for i in 0..(src.len) + 1 {
+        if (i == src.len) {
+            if (line.len > 0) { mod_line(pp, line, base, path, lineno); }
+        } else {
+            if (src[i] == '\n') { mod_line(pp, line, base, path, lineno); line = ""; lineno += 1; }
+            else                { line = line + substr(src, i, 1); }
+        }
+    }
+}
+
+string resolve_modules(string path, SrcMap* map) {
+    string[dynamic] seed = []
+    ModPP pp = ModPP{ seed, "", map }
+    pp.seen.push(path)
+    mod_file(&pp, path)
+    return pp.out
+}
+
+// ---- pipeline helpers --------------------------------------------------
 
 void report_parse_error(Parser* p, SrcMap* map, string path) {
     print(src_loc(map, basename_of(path), p.err_line, p.err_col) + ": parse error: " + p.err_msg)
@@ -30,23 +144,121 @@ int cmd_ast(string path) {
     Token[dynamic] toks = lex(read_file(path))
     Parser p = new_parser(toks)
     Program prog = parse_program(&p)
-    if p.had_error { report_parse_error(&p, null, path); return 1 }
+    if (p.had_error) { report_parse_error(&p, null, path); return 1; }
     print_program(prog)
     return 0
 }
 
-var argv = args()
-if argv.len < 3 {
-    print("usage: stratac tokens|ast <file.strata>")
-    exit(2)
+int cmd_check(string path) {
+    SrcMap* map = new_srcmap()
+    Token[dynamic] toks = lex(resolve_modules(path, map))
+    Parser p = new_parser(toks)
+    Program prog = parse_program(&p)
+    if (p.had_error) { report_parse_error(&p, map, path); return 1; }
+    Checker* ck = new_checker(basename_of(path))
+    ck.map = map
+    ck_check(ck, prog)
+    if (ck.had_error) { return 1; }
+    print("no type errors")
+    return 0
 }
-string cmd  = argv[1]
-string path = argv[2]
-if cmd == "tokens" {
-    exit(cmd_tokens(path))
+
+int cmd_emit(string path) {
+    SrcMap* map = new_srcmap()
+    Token[dynamic] toks = lex(resolve_modules(path, map))
+    Parser p = new_parser(toks)
+    Program prog = parse_program(&p)
+    if (p.had_error) { report_parse_error(&p, map, path); return 1; }
+    Checker* ck = new_checker(basename_of(path))
+    ck.map = map
+    ck_check(ck, prog)
+    if (ck.had_error) { return 1; }
+    Codegen cg = Codegen{ "", false }
+    string out = generate(&cg, prog)
+    if (cg.had_error) { print("codegen: program uses features not supported yet"); return 1; }
+    printf(cstr("%s"), cstr(out))// verbatim, like fputs
+    return 0
 }
-if cmd == "ast" {
-    exit(cmd_ast(path))
+
+bool build_exe(string path, string libdir, bool quiet) {
+    SrcMap* map = new_srcmap()
+    Token[dynamic] toks = lex(resolve_modules(path, map))
+    Parser p = new_parser(toks)
+    Program prog = parse_program(&p)
+    if (p.had_error) { report_parse_error(&p, map, path); return false; }
+    Checker* ck = new_checker(basename_of(path))
+    ck.map = map
+    ck_check(ck, prog)
+    if (ck.had_error) { return false; }
+    Codegen cg = Codegen{ "", false }
+    string c = generate(&cg, prog)
+    if (cg.had_error) { print("codegen: program uses features not supported yet"); return false; }
+
+    // link libraries requested by `link "..."` directives (e.g. raylib)
+    string links = ""
+    for i in 0..prog.decls.len {
+        if (prog.decls[i].kind == DcLink) { links = links + " -l" + prog.decls[i].path; }
+    }
+
+    string stem = stem_of(path)
+    string cpath = stem + ".c"
+    string exepath = stem + ".exe"
+    write_file(cpath, c)
+
+    // gnu11 for __auto_type; -I<libdir> for <arena.h>/<smath.h>; link libs; -lm for math.
+    string cmd = "gcc -std=gnu11 -O2 \"" + cpath + "\" -I\"" + libdir + "\"" + links + " -o \"" + exepath + "\" -lm"
+    int rc = system(cstr(cmd))
+    if (rc != 0) { return false; }
+    if (!quiet) { print("built " + exepath); }
+    return true
 }
-print("unknown command: " + cmd)
-exit(2)
+
+int cmd_run(string path, string libdir, string[dynamic] args) {
+    if (!build_exe(path, libdir, true)) { return 1; }
+    string exe = stem_of(path) + ".exe"
+    string exe2 = ""
+    for i in 0..exe.len {
+        if (exe[i] == '/') { exe2 = exe2 + "\\"; } else { exe2 = exe2 + substr(exe, i, 1); }
+    }
+    // a bare `prog.exe` is not found when the shell doesn't search the current dir
+    if (dirname_of(exe2) == ".") { exe2 = ".\\" + exe2; }
+    string runcmd = "\"" + exe2 + "\""
+    for i in 3..args.len { runcmd = runcmd + " \"" + args[i] + "\""; }
+    runcmd = "\"" + runcmd + "\""// cmd.exe strips the outer quote pair
+    return system(cstr(runcmd))
+}
+
+int usage() {
+    print("stratac - the Strata compiler")
+    print("usage:")
+    print("  stratac run    <file.strata>   compile and run")
+    print("  stratac build  <file.strata>   compile to a native executable")
+    print("  stratac check  <file.strata>   type-check only")
+    print("  stratac emit   <file.strata>   print the generated C")
+    print("  stratac ast    <file.strata>   parse and print the AST")
+    print("  stratac tokens <file.strata>   print the token stream")
+    return 2
+}
+
+int dmm_main(string[dynamic] args) {
+    if (args.len == 2 && (args[1] == "version" || args[1] == "--version")) {
+        print("stratac " + stratac_version() + " - the Strata compiler")
+        return 0
+    }
+    if (args.len < 3) { return usage(); }
+
+    string cmd  = args[1]
+    string file = args[2]
+    string libdir = resolve_libdir(args[0])
+    if (cmd == "tokens") { return cmd_tokens(file); }
+    if (cmd == "ast")    { return cmd_ast(file); }
+    if (cmd == "check")  { return cmd_check(file); }
+    if (cmd == "emit")   { return cmd_emit(file); }
+    if (cmd == "build")  { if (build_exe(file, libdir, false)) { return 0; } return 1; }
+    if (cmd == "run")    { return cmd_run(file, libdir, args); }
+    return usage()
+}
+
+// entry point (translated from D--'s `int main(str[] args)`)
+import <stdlib.h>
+exit(dmm_main(args()))

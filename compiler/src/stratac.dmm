@@ -14,7 +14,7 @@
 #include "dump.dmm"    // print_tokens / print_program (+ the core via core.dmm)
 #include <stdlib.h>    // system()  (C header, passed through to the generated C)
 
-str stratac_version() { return "0.17.0 (self-hosting: parser ported)"; }
+str stratac_version() { return "1.0.0 (self-hosted)"; }
 
 // ---- paths -------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// src/parser.dmm - the Strata parser, written in D-- (a MODULE, no main). CORE.
+// selfhost/parser.strata - the Strata parser, written in Strata (translated from the D-- bootstrap seed; a MODULE, no main). CORE.
 //
 // Milestone 1, step 2. Recursive descent: Token[] -> ast.hmm nodes. Included by the
 // core; front-ends print the tree via `strata ast`.

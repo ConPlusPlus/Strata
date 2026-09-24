@@ -17,6 +17,8 @@ compiler/selfhost/*.exe
 
 # build output directory (stratac.exe, console.exe, libstrata.dll, libstrata.c)
 compiler/bin/
+# bootstrap stage compilers (stage0/1/2, see compiler/build.ps1)
+compiler/build/
 
 # packaged release archives (uploaded to GitHub Releases, not committed)
 compiler/dist/

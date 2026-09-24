@@ -1,32 +1,30 @@
-# tests/run.ps1 - rebuild the Strata compiler and validate each stage against its
-# golden files, byte-for-byte (ARCHITECTURE.md sec 6). Run from anywhere:
+# tests/run.ps1 - bootstrap the Strata compiler (build.ps1) and validate it:
+#   1. goldens: each stage's output vs its golden file, byte-for-byte (ARCHITECTURE.md sec 6)
+#   2. bootstrap parity: the self-hosted compiler vs the frozen D-- seed, every stage
+# Run from anywhere:
 #     powershell -ExecutionPolicy Bypass -File compiler\tests\run.ps1
 #
 # A golden file  tests/<stage>/<name>.expected  is compared against the output of
-#     strata <stage> examples/<name>.strata
+#     stratac <stage> examples/<name>.strata
+# using the SHIPPED compiler (bin\stratac.exe, the self-hosted stage2).
 # Exit code 0 = all passed, 1 = a mismatch or build failure.
 
 $ErrorActionPreference = "Stop"
 $here     = Split-Path -Parent $MyInvocation.MyCommand.Path   # ...\compiler\tests
 $compiler = Split-Path -Parent $here                          # ...\compiler
 $src      = Join-Path $compiler "src"
+$selfhost = Join-Path $compiler "selfhost"
 $examples = Join-Path $compiler "examples"
 
-# --- locate the D-- compiler (dec) -------------------------------------------
-$dec = (Get-Command dec -ErrorAction SilentlyContinue).Source
-if (-not $dec) { $dec = "C:\DMinusMinus\dec.exe" }
-if (-not (Test-Path $dec)) { Write-Host "FAIL: dec not found (PATH or C:\DMinusMinus\dec.exe)" -ForegroundColor Red; exit 1 }
-
-# --- rebuild the compiler ----------------------------------------------------
-Push-Location $src
-& $dec build stratac.dmm | Out-Null
-$ok = $?
-Pop-Location
-if (-not $ok) { Write-Host "FAIL: compiler build failed" -ForegroundColor Red; exit 1 }
-$strata = Join-Path $src "stratac.exe"
+# --- bootstrap (stage0 -> stage1 -> stage2, with the fixpoint check) ---------
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $compiler "build.ps1") | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Host "FAIL: bootstrap build failed (run compiler\build.ps1 to see why)" -ForegroundColor Red; exit 1 }
+$strata = Join-Path $compiler "bin\stratac.exe"
+$stage0 = Join-Path $compiler "build\stage0.exe"
+Write-Host "PASS  bootstrap (stage0 -> stage1 -> stage2, fixpoint)" -ForegroundColor Green
+$pass = 1; $fail = 0
 
 # --- run each golden ---------------------------------------------------------
-$pass = 0; $fail = 0
 Get-ChildItem -Path $here -Directory | ForEach-Object {
     $stage = $_.Name                                          # e.g. "tokens"
     Get-ChildItem -Path $_.FullName -Filter *.expected | ForEach-Object {
@@ -50,32 +48,25 @@ Get-ChildItem -Path $here -Directory | ForEach-Object {
     }
 }
 
-# --- self-hosting: the Strata-written compiler must match the D-- one ------------
-# Build selfhost/stratac.strata with the D-- stratac, then require byte-identical output
-# for every stage it has been ported to, over every example and compiler source file.
-$selfhost = Join-Path $compiler "selfhost"
-$selfsrc  = Join-Path $selfhost "stratac.strata"
-& $strata build $selfsrc | Out-Null
-if (-not $?) {
-    Write-Host "FAIL  selfhost build" -ForegroundColor Red
-    $fail++
-} else {
-    $selfexe = Join-Path $selfhost "stratac.exe"
-    $inputs  = @(Get-ChildItem $examples -Filter *.strata) + @(Get-ChildItem $selfhost -Filter *.strata) + @(Get-ChildItem $src -Include *.dmm,*.hmm -Recurse)
-    foreach ($stage in @("tokens", "ast")) {
-        $bad = @()
-        foreach ($f in $inputs) {
-            $want = (& $strata  $stage $f.FullName) -join "`n"
-            $got  = (& $selfexe $stage $f.FullName) -join "`n"
-            if ($want -ne $got) { $bad += $f.Name }
-        }
-        if ($bad.Count -eq 0) {
-            Write-Host "PASS  selfhost/$stage  ($($inputs.Count) files identical)" -ForegroundColor Green
-            $pass++
-        } else {
-            Write-Host "FAIL  selfhost/$stage  differs on: $($bad -join ', ')" -ForegroundColor Red
-            $fail++
-        }
+# --- bootstrap parity: self-hosted compiler vs the frozen D-- seed -----------
+# While selfhost/ is still a faithful translation of src/, both compilers must agree
+# byte-for-byte on every stage, over every example and compiler source. Once the
+# Strata compiler deliberately gains something the seed lacks, drop the affected stage
+# here (the fixpoint check in build.ps1 is what must always hold).
+$inputs = @(Get-ChildItem $examples -Filter *.strata) + @(Get-ChildItem $selfhost -Filter *.strata) + @(Get-ChildItem $src -Include *.dmm,*.hmm -Recurse)
+foreach ($stage in @("tokens", "ast", "check", "emit")) {
+    $bad = @()
+    foreach ($f in $inputs) {
+        $want = (& $stage0 $stage $f.FullName) -join "`n"
+        $got  = (& $strata $stage $f.FullName) -join "`n"
+        if ($want -ne $got) { $bad += $f.Name }
+    }
+    if ($bad.Count -eq 0) {
+        Write-Host "PASS  parity/$stage  ($($inputs.Count) files identical to the D-- seed)" -ForegroundColor Green
+        $pass++
+    } else {
+        Write-Host "FAIL  parity/$stage  differs on: $($bad -join ', ')" -ForegroundColor Red
+        $fail++
     }
 }
 

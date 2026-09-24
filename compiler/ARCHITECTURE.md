@@ -43,11 +43,18 @@ ever reaches backward or sideways.**
 
 ## 2. File layout (mirrors D--)
 
+**The compiler is written in Strata and lives in `selfhost/`** (`token.strata`,
+`lexer.strata`, ... one file per phase, same names and structure as below). `src/` holds
+the original D-- implementation, now the **frozen bootstrap seed**: `build.ps1` compiles it
+with `dec` (stage0), uses that to compile `selfhost/` (stage1), then has stage1 compile
+`selfhost/` again (stage2) and requires identical C output (the fixpoint). The layout
+below describes `src/`; `selfhost/` mirrors it file for file (`.hmm`/`.dmm` → `.strata`).
+
 ```
 compiler/
 ├─ ARCHITECTURE.md      ← this file
-├─ build.ps1            builds all artifacts into bin/ (2 exes + libstrata.dll)
-├─ src/
+├─ build.ps1            bootstraps + builds all artifacts into bin/ (2 exes + libstrata.dll)
+├─ src/                 the frozen D-- bootstrap seed:
 │  │  ── the CORE (no main; the "library") ──
 │  ├─ token.hmm         shared data: token kinds + Token struct
 │  ├─ ast.hmm           shared data: node kinds (tagged union) + node structs
@@ -64,7 +71,8 @@ compiler/
 ├─ bin/                 build output: stratac.exe, console.exe, libstrata.dll
 ├─ lib/                 the C runtime the OUTPUT links against (arena.h, math, prelude)
 ├─ examples/            sample .strata programs
-├─ selfhost/            the compiler being ported to Strata (tested against src/)
+├─ selfhost/            THE COMPILER, in Strata (edit here; see HANDOFF.md)
+├─ build/               bootstrap stage compilers stage0/1/2 (build output, gitignored)
 └─ tests/              golden-file tests, one dir per stage (tokens/, ast/, ...)
 ```
 
@@ -295,7 +303,7 @@ only the *installed toolchain* is monolithic. Built by `build.ps1`, deployed by
 
 ```
 %LOCALAPPDATA%\Programs\strata\   (per-user; -System → %ProgramFiles%\strata; -Prefix to override)
-├─ stratac.exe         the compiler CLI, built from compiler/src by D--'s `dec`
+├─ stratac.exe         the compiler CLI, self-hosted (stage2 of the bootstrap)
 ├─ console.exe        the explorer front-end
 ├─ libstrata.dll      the core as a shared library (for embedders)
 ├─ tcc.exe            BUNDLED — so `stratac run` needs no external toolchain   (with codegen)

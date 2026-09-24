@@ -97,11 +97,35 @@ def convert_new_text(text):
         out.append(text[i:m.start()] + 'alloc(' + m.group(1) + '{' + inner + '})')
         i = j
 
+def mask_literals(code):
+    # Same length as `code`, with the INSIDE of every string/char literal replaced by `_`,
+    # so patterns only ever match real code (e.g. a C `for (...)` inside a string that
+    # codegen emits must be left alone).
+    out = list(code)
+    i = 0
+    while i < len(code):
+        q = code[i]
+        if q in '"\'':
+            j = i + 1
+            while j < len(code) and code[j] != q:
+                j += 2 if code[j] == '\\' else 1
+            for k in range(i + 1, min(j, len(code))):
+                out[k] = '_'
+            i = j + 1
+        else:
+            i += 1
+    return ''.join(out)
+
+FOR_RE = re.compile(r'for\s*\(\s*(?:int|int64_t)\s+(\w+)\s*=\s*(.+?);\s*\1\s*(<=?)\s*(.+?);\s*\1\s*\+\+\s*\)')
+
 def convert_for(line):
-    # for (int i = A; i < B; i++)  ->  for i in A..B     (the common counting idiom)
-    m = re.search(r'for\s*\(\s*(?:int|int64_t)\s+(\w+)\s*=\s*(.+?);\s*\1\s*<\s*(.+?);\s*\1\s*\+\+\s*\)', line)
+    # for (int i = A; i < B; i++)   ->  for i in A..B       (the common counting idiom)
+    # for (int i = A; i <= B; i++)  ->  for i in A..(B) + 1 (`..` binds loosest)
+    m = FOR_RE.search(mask_literals(line))
     if m:
-        return line[:m.start()] + f'for {m.group(1)} in {m.group(2)}..{m.group(3)}' + line[m.end():]
+        m = FOR_RE.match(line, m.start())   # same span, real text for the groups
+        hi = m.group(4) if m.group(3) == '<' else f'({m.group(4)}) + 1'
+        return line[:m.start()] + f'for {m.group(1)} in {m.group(2)}..{hi}' + line[m.end():]
     return line
 
 def convert_words(line):
@@ -123,6 +147,7 @@ FLAGS = [
 
 def flags_for(line):
     code, _, _ = split_comment(line)
+    code = mask_literals(code)
     out = []
     for pat, msg in FLAGS:
         if re.search(pat, code):
@@ -132,6 +157,17 @@ def flags_for(line):
 def translate(text):
     out = []
     text = convert_new_text(text)
+    # file header: `// src/lexer.dmm - ..., written in D--` names the Strata file instead
+    text = re.sub(r'^// src/(\w+)\.(?:dmm|hmm) - ', r'// selfhost/\1.strata - ', text, count=1, flags=re.M)
+    text = text.replace('written in D-- (', 'written in Strata (translated from the D-- bootstrap seed; ', 1)
+    text = text.replace(', written in D--', ', written in Strata (translated from the D-- bootstrap seed)', 1)
+    # D-- `int main(str[] args) {...}` -> a plain function, called from Strata's top-level
+    # code (Strata's entry point) with args() and its result as the exit code.
+    main_re = re.compile(r'^int\s+main\s*\(\s*str\s*\[\s*\]\s*(\w+)\s*\)', re.M)
+    if main_re.search(text):
+        text = main_re.sub(r'int dmm_main(str[] \1)', text, count=1)
+        text = text.rstrip('\n') + ('\n\n// entry point (translated from D--\'s `int main(str[] args)`)\n'
+                                    'import <stdlib.h>\nexit(dmm_main(args()));\n')
     for raw in text.split('\n'):
         line = convert_include(raw)
         if not line.lstrip().startswith('import'):

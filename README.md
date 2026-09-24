@@ -30,7 +30,7 @@ for i in 0..60 {
 
 ## Status
 
-Early but real — programs **compile and run today** (compiler at v0.9.0):
+**v1.0.0: self-hosted.** The compiler is written in Strata and compiles itself.
 
 - ✅ lexer, parser, type checker, C codegen
 - ✅ arena/region memory, structs, functions, control flow
@@ -44,26 +44,34 @@ Early but real — programs **compile and run today** (compiler at v0.9.0):
 - ✅ **games written in Strata** — a raylib window ([`window.strata`](compiler/examples/window.strata))
   and an **arrow-key-driven sprite** ([`sprite.strata`](compiler/examples/sprite.strata), movement
   computed with Strata's own `vec2` math) build to single native binaries
-- ⏳ next: a small prelude (input/time), C struct/enum binding, then SoA arrays and hot-reload
+- ✅ `cast<T>(x)`, `sizeof(T)`, string/file built-ins (`substr`, `read_file`, `args()`, ...)
+- ✅ **self-hosted**: `stratac` is written in Strata ([`compiler/selfhost/`](compiler/selfhost/)),
+  bootstrapped from a frozen D-- seed and verified to reproduce itself byte-for-byte
+- ✅ syntax highlighting for VS Code and Visual Studio ([`editors/`](editors/))
+- ⏳ next: tagged unions + pattern matching, SoA arrays, hot-reload
 
-The compiler is called **`stratac`** and is itself written in D-- (a self-hosting
-C-compiling language), which produces plain C.
+The compiler is called **`stratac`**. It is written in Strata and compiles to plain C.
+It was bootstrapped from D-- (a separate C-compiling language); the D-- version is kept
+as the frozen seed that starts the build.
 
 ## Layout
 
 ```
-compiler/   the stratac compiler (written in D--)  — see compiler/ARCHITECTURE.md
+compiler/   the stratac compiler (written in Strata) — see compiler/ARCHITECTURE.md
+editors/    syntax highlighting (VS Code, Visual Studio)
 website/    design + documentation                 — see website/design/DESIGN.md
 Strata.md   the founding project plan
 ```
 
 ## Build & run
 
-Requires the D-- compiler (`dec`) and a C compiler (`gcc`). See
-[`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) for the toolchain.
+Requires a C compiler (`gcc`), and the D-- compiler (`dec`) to bootstrap. See
+[`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) for the toolchain. To just *use*
+Strata, grab a release zip instead; it needs only `gcc`.
 
 ```powershell
-# build stratac.exe, console.exe, libstrata.dll into compiler\bin\
+# bootstrap (D-- seed -> stratac -> stratac) and build stratac.exe, console.exe,
+# libstrata.dll into compiler\bin\
 powershell -ExecutionPolicy Bypass -File compiler\build.ps1
 
 # run a program

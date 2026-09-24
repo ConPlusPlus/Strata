@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// src/ast.hmm - the Strata AST. Part of the compiler CORE (no main; reused by every
+// selfhost/ast.strata - the Strata AST. Part of the compiler CORE (no main; reused by every
 // front-end). Follows D--'s "kind tag + fat struct + new_* constructor" style
 // (ARCHITECTURE.md sec 4: the AST is the spine, traversed by switch on `kind`).
 //

@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
+// selfhost/core.strata - the Strata compiler CORE, as one umbrella include.
+//
+// This IS "the compiler as a library": the phases (lexer -> parser -> checker ->
+// codegen) with NO main. Every front-end (the `strata` CLI, the `console`, a future
+// libstrata.dll or LSP server) pulls in exactly this and nothing else. Keeping the
+// core main-free and front-end-agnostic is what lets the same code ship as an exe, a
+// DLL, or a language server without a rewrite (ARCHITECTURE.md sec 11).
+//
+// AST -> validated/inferred (brings ast.hmm)
+import checker
+// brings parser.dmm -> lexer.dmm -> ast.hmm -> token.hmm (dedup'd)
+import codegen

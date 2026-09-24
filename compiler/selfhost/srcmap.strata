@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// src/srcmap.hmm - maps a line of the module-resolved source back to its origin file.
+// selfhost/srcmap.strata - maps a line of the module-resolved source back to its origin file.
 // Part of the CORE (shared data). `import Name` pastes modules into one text before
 // lexing, so token line numbers index that combined text; the driver records, per
 // combined line, where it came from, and diagnostics translate through this map.
