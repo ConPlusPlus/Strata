@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/stratac.strata - the Strata compiler driver (front-end #1: the CLI, `stratac`).
+// src/stratac.strata - the Strata compiler driver (front-end #1: the CLI, `stratac`).
 // Thin: CLI + orchestration only (ARCHITECTURE.md rule #4). Pulls in the shared
-// renderer (dump.dmm), which pulls in the whole core (incl. codegen).
+// renderer (dump.strata), which pulls in the whole core (incl. codegen).
 //
 //   stratac tokens <file.strata>   print the token stream
 //   stratac ast    <file.strata>   parse and print the AST

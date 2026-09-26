@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/console.strata - the Strata explorer console (front-end #2).
+// src/console.strata - the Strata explorer console (front-end #2).
 //
-// A SECOND, independent executable built on the exact same core (core.dmm) and the
-// same renderer (dump.dmm) as the `strata` CLI. Its only job is to prove the point of
+// A SECOND, independent executable built on the exact same core (core.strata) and the
+// same renderer (dump.strata) as the `strata` CLI. Its only job is to prove the point of
 // the architecture: the compiler is a reusable library, and a front-end is a thin
 // shell over it. This one shows a file's tokens AND its AST together in one view - a
 // tiny "compiler explorer" for eyeballing what the core produced.

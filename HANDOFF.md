@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 1.1.0** · tests: **44/44** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 1.1.0** · tests: **43/43** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -24,10 +24,10 @@ Four ideas:
 - **Seamless C interop** — it *is* C underneath; `import` a header, `link` a library, call C.
 - **Hot-reload** — planned runtime (not built yet).
 
-The compiler is **`stratac`**, and it is **written in Strata** (`compiler/selfhost/`): it
-compiles itself. It was bootstrapped from **D--**, a separate self-hosting C-compiling
-language (in `C:\DMinusMinus`); the D-- version (`compiler/src/`) is kept as the frozen
-**seed** that starts every build (see §3).
+The compiler is **`stratac`**, and it is **written in Strata** (`compiler/src/`): it
+compiles itself. The build starts from a pinned, released `stratac` (see §3). It was
+originally written in **D--**, a separate C-compiling language (`C:\DMinusMinus`). That
+version is retired to `archive/dminusminus-seed/`.
 
 ---
 
@@ -49,9 +49,9 @@ Strata/
 │  ├─ build.ps1           build all artifacts into bin/
 │  ├─ install.ps1         install the toolchain + add to PATH
 │  ├─ package.ps1         build a release .zip into dist/
-│  ├─ selfhost/           THE COMPILER, written in Strata (see §4) — edit here
-│  ├─ src/                the frozen D-- bootstrap seed (same structure, .dmm/.hmm)
-│  ├─ build/              bootstrap stage compilers (gitignored)
+│  ├─ src/                THE COMPILER, written in Strata (see §4)
+│  ├─ bootstrap.txt       the pinned release version the build bootstraps from
+│  ├─ build/              bootstrap compilers: cached release + stage1/2 (gitignored)
 │  ├─ lib/                the RUNTIME the compiled programs link against (see §7)
 │  ├─ examples/           sample .strata programs (see §8)
 │  ├─ tests/              golden-file tests + run.ps1 (see §6)
@@ -59,7 +59,7 @@ Strata/
 │  └─ dist/               release archives (gitignored)
 ├─ website/design/DESIGN.md   the language design ("proposal to react to")
 ├─ editors/              syntax highlighting: VS Code + Visual Studio (see editors/README.md)
-└─ tools/dmm2strata.py    D-- -> Strata source translator (for self-hosting)
+└─ archive/               retired: the D-- compiler + the D--→Strata translator
 ```
 
 ---
@@ -67,8 +67,6 @@ Strata/
 ## 3. Toolchain & how to build / run / test
 
 **Prerequisites (already set up on this machine):**
-- **D-- compiler `dec`** — at `C:\DMinusMinus\dec.exe`. **Not on PATH**; use the full path.
-  Only needed for stage0 of the bootstrap.
 - **gcc** — via MSYS2 at `C:\msys64\mingw64\bin` (on PATH). Strata shells out to it.
 - **raylib** — installed via MSYS2 (`C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-raylib`),
   for the graphical examples.
@@ -77,13 +75,15 @@ Strata/
 ```
 powershell -ExecutionPolicy Bypass -File compiler\build.ps1
 ```
-This is a **bootstrap**: `dec` builds the D-- seed in `src/` → `build/stage0.exe`; stage0
-builds `selfhost/stratac.strata` → `stage1.exe`; stage1 builds it again → `stage2.exe`.
-The build **fails unless stage1 and stage2 emit byte-identical C** (the fixpoint). stage2
-is copied to `bin/stratac.exe`.
+This is a **bootstrap**. stage0 is the pinned release named in `compiler/bootstrap.txt`,
+downloaded from GitHub once and cached in `build/`. Pass `-Bootstrap <stratac.exe>` to
+use another compiler; if the download fails, the installed `stratac` on PATH is used.
+Then stage0 builds `src/stratac.strata` → `stage1.exe`, and stage1 builds it again →
+`stage2.exe`. The build **fails unless stage1 and stage2 emit byte-identical C** (the
+fixpoint). stage2 is copied to `bin/stratac.exe`.
 
-Quick iteration on the compiler: `compiler\bin\stratac.exe build compiler\selfhost\stratac.strata`
-(produces `selfhost\stratac.exe`), then run the full `build.ps1` + tests before committing.
+Quick iteration on the compiler: `compiler\bin\stratac.exe build compiler\src\stratac.strata`
+(produces `src\stratac.exe`), then run the full `build.ps1` + tests before committing.
 
 **Use the compiler:**
 ```
@@ -121,17 +121,17 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 
 | File | Role |
 |---|---|
-| `token.hmm` | token kinds + `Token` (shared data) |
-| `ast.hmm` | AST node types (`TypeNode`/`Expr`/`Stmt`/`Decl`), tag + fat-struct + `new_*` ctors |
-| `lexer.dmm` | text → tokens. Significant newlines (Go-style), `..` range, types-first |
-| `parser.dmm` | tokens → AST. Recursive descent; paren-free control flow via a `no_brace` flag |
-| `checker.dmm` | AST → validated/typed AST. Name resolution, types, `var` inference; writes each expression's resolved type onto `Expr.rtype` for codegen |
-| `codegen.dmm` | typed AST → C. Reads `rtype` for operator overloading (`vec3_add`, `.`/`->`, etc.) |
-| `core.dmm` | umbrella `#include` = the whole compiler CORE, **no `main`** (the "library") |
-| `dump.dmm` | renders tokens/AST to text (front-end utility) |
-| `modules` | the module loader: parses each file, builds the module table (Strata compiler only; the D-- seed pastes text) |
-| `stratac.dmm` | front-end #1: the CLI + orchestration (gcc invocation) |
-| `console.dmm` | front-end #2: a tokens+AST explorer (proves the core is reusable) |
+| `token.strata` | token kinds + `Token` (shared data) |
+| `ast.strata` | AST node types (`TypeNode`/`Expr`/`Stmt`/`Decl`), tag + fat-struct + `new_*` ctors; `Module`/`Program` |
+| `lexer.strata` | text → tokens. Significant newlines (Go-style), `..` range, types-first |
+| `parser.strata` | tokens → AST. Recursive descent; paren-free control flow via a `no_brace` flag |
+| `modules.strata` | the module loader: parses each file, builds the module table |
+| `checker.strata` | AST → validated/typed AST. Name resolution + module visibility, types, `var` inference; writes each expression's resolved type onto `Expr.rtype` for codegen |
+| `codegen.strata` | typed AST → C. Reads `rtype` for operator overloading (`vec3_add`, `.`/`->`, etc.) |
+| `core.strata` | umbrella module: `export import`s every phase = the compiler CORE, **no `main`** (the "library") |
+| `dump.strata` | renders tokens/AST to text (front-end utility) |
+| `stratac.strata` | front-end #1: the CLI + orchestration (gcc invocation) |
+| `console.strata` | front-end #2: a tokens+AST explorer (proves the core is reusable) |
 
 **Key ideas:**
 - **The core has no `main`.** `stratac`, `console`, and `libstrata.dll` are thin front-ends
@@ -141,12 +141,10 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 - **`Expr.rtype`** — the checker annotates every expression with its resolved type. Codegen
   uses this to pick the right C (e.g. `a + b` → `vec3_add(a,b)` when `a` is a vec3, `.` vs
   `->` for field access, `sizeof` for `alloc`, element casts for dynamic arrays).
-- **Modules** (`selfhost/modules.strata`): `load_program` parses the root file and each
+- **Modules** (`src/modules.strata`): `load_program` parses the root file and each
   imported module *separately* (each file once), tags every declaration with its module,
   and builds the module table. The checker enforces visibility from that table and gives
-  colliding private names module-prefixed C names. (The frozen D-- seed still uses the old
-  paste-the-text preprocessor in `src/stratac.dmm`; it ignores `export`, which is why it
-  can still bootstrap the Strata compiler.)
+  colliding private names module-prefixed C names.
 
 ---
 
@@ -213,16 +211,13 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
 
 ## 6. Tests
 
-`run.ps1` runs **44 checks**:
-1. **bootstrap**: runs `build.ps1` (stage0 → stage1 → stage2 + the fixpoint check).
+`run.ps1` runs **43 checks**:
+1. **bootstrap**: runs `build.ps1` (pinned release → stage1 → stage2 + the fixpoint check).
 2. **goldens**: `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
    against `bin/stratac.exe <stage> examples/<name>.strata`, using the self-hosted
    compiler. Stages: `tokens`, `ast`, `check`, `run`, and `emit`. The `emit` goldens pin
-   the generated C for every example, which is what replaced the old D-- parity checks.
+   the generated C for every example.
    Add a test by dropping a `.expected` file in the right folder.
-3. **lexer parity**: token output must still match the D-- seed on every example and
-   compiler source. The `ast`/`check`/`emit` parity checks were retired when the module
-   system made the compiler deliberately diverge from the seed.
 
 ---
 
@@ -253,32 +248,29 @@ alloc+null), `casts` (`cast<T>`/`sizeof`), `prelude`, `modules`+`greetlib` (impo
 
 ---
 
-## 9. Self-hosting (done in v1.0.0) — how to work on the compiler now
+## 9. Self-hosting — how to work on the compiler
 
-**The compiler source is `compiler/selfhost/*.strata`. Edit there.** `src/*.dmm` is the
-frozen D-- bootstrap seed; don't change it except to keep the bootstrap working.
+**The compiler source is `compiler/src/*.strata`.** It has been self-hosted since v1.0.0
+and moved to `src/` after v1.1.0. The D-- original is in `archive/dminusminus-seed/`.
 
-How it got here: `tools/dmm2strata.py` translated every D-- module mechanically, and every
+How it got here: a translator (now archived) ported every D-- module mechanically, and every
 failure was fixed in Strata or the translator rather than by hand-editing the port. That
-turned up about a dozen real Strata bugs and gaps (array-literal element sizes, char
-escaping, NUL in strings, missing built-ins, `;` and newline rules). The self-hosted
-compiler then reproduced itself byte-for-byte (the fixpoint).
+turned up about a dozen real Strata bugs and gaps. The Strata compiler then reproduced
+itself byte-for-byte (the fixpoint), and the build now always checks that.
 
-**The one rule of a self-hosted compiler:** `selfhost/` is compiled by **stage0** (the D--
-seed), so the compiler's *own source* may only use language features the seed
-understands. You can add any feature *to* the language freely, but if the compiler's own
-code wants to *use* a new feature, first move the bootstrap off D--: make stage0 a
-pinned, released `stratac.exe` (e.g. the v1.0.0 release zip) instead of `dec` + `src/`.
-That's how Go and Rust bootstrap. After that, D-- and `src/` can be retired.
+**The bootstrap rule:** stage0 is the release pinned in `compiler/bootstrap.txt`, so the
+compiler's *own source* may only use language features that release supports. You can add
+any feature *to* the language freely. But before the compiler's own code *uses* one:
+release a version containing it, then bump `bootstrap.txt` to that version. That's how Go
+and Rust bootstrap.
 
 **Style debt:** the port is a literal translation, so it still reads like D-- (parenthesized
 conditions, `;` inside one-line blocks, `0 - 1`). It's all valid Strata; clean it up
-opportunistically. Doing so drops parity for nothing, so keep the parity checks until you
-start.
+opportunistically. The emit goldens and the fixpoint check catch mistakes.
 
-**Where D-- and Strata strings differ:** Strata strings are NUL-terminated C strings and
-`.len` is `strlen` (O(n)). The lexer keeps literals as written, so no NUL is ever needed.
-Watch performance if the compiler starts building very large strings.
+**Strings:** Strata strings are NUL-terminated C strings and `.len` is `strlen` (O(n)). The
+lexer keeps literal text as written, so the compiler never needs a NUL in a string. Watch
+performance if the compiler starts building very large strings.
 
 ---
 
@@ -300,27 +292,20 @@ Watch performance if the compiler starts building very large strings.
   Release; `package.ps1` builds the release `.zip` an installer could pull. `.gitattributes`
   forces LF; `.gitignore` excludes `bin/`, `dist/`, generated `.c`/`.exe`, `.vs/`.
 - **Versioning:** Semantic Versioning (1.0.0 = self-hosting). The `stratac_version()` string
-  (in `selfhost/stratac.strata`) is bumped in the same commit as the tag. Build each
+  (in `src/stratac.strata`) is bumped in the same commit as the tag. Build each
   release zip from a worktree of its tag so the binaries match the version.
 - **License:** GPL-3.0 on the compiler; runtime linking exception on `lib/` (games built
   with Strata are yours); a commercial license ($100, may go dynamic) lifts copyleft for
   private compiler forks (enabled by the CLA). "Strata™" is a common-law trademark (no ®).
-- **Detection:** `.gitattributes` maps `.strata`/`.dmm`/`.hmm` to C for GitHub highlighting.
+- **Detection:** `.gitattributes` maps `.strata` (and the archived `.dmm`/`.hmm`) to C for GitHub highlighting.
 
 ---
 
 ## 12. Gotchas (things that will bite you)
 
-- **Edit `selfhost/`, not `src/`**: the D-- files are the frozen seed (§9).
-- **`dec` is not on PATH** — always `C:\DMinusMinus\dec.exe`.
-- **D-- reserved keywords can't be used as identifiers in the compiler source** — e.g.
-  `fn`, `auto`, `str`, `new`, `cast`, `sizeof`, `global`, `switch`, `region`. (A local named
-  `fn` once caused a silent parse failure.) D-- parse errors are silent (exit 1, no message)
-  — bisect by feeding prefixes to `dec ast`.
+- **The compiler's own code can only use what the pinned bootstrap release supports** (§9).
 - **Imports aren't transitive.** If a file uses something, it must import the module that
   declares it (or an umbrella that `export import`s it). The error message says which.
-- **The D-- seed pastes modules** and ignores `export`, so the compiler's own source must
-  stay valid under *both* rules (it does: seed builds stage1, which enforces them).
 - **GUI examples block** (a window stays open until closed) — don't run them in an
   automated/headless step; `stratac build` them instead.
 - **Line endings:** goldens are LF; the PowerShell test runner normalizes CRLF/LF.

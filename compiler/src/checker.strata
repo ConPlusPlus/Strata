@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/checker.strata - the Strata type checker (a.k.a. sema), written in Strata (translated from the D-- bootstrap seed; a MODULE,
+// src/checker.strata - the Strata type checker (a.k.a. sema), written in Strata (originally ported from D--; a MODULE,
 // no main). CORE. Milestone 1, step 4.
 //
 // AST -> validated + inferred AST. Does name resolution (scopes), type checking, arity,

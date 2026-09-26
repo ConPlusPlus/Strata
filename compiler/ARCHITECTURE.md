@@ -43,63 +43,62 @@ ever reaches backward or sideways.**
 
 ## 2. File layout (mirrors D--)
 
-**The compiler is written in Strata and lives in `selfhost/`** (`token.strata`,
-`lexer.strata`, ... one file per phase, same names and structure as below). `src/` holds
-the original D-- implementation, now the **frozen bootstrap seed**: `build.ps1` compiles it
-with `dec` (stage0), uses that to compile `selfhost/` (stage1), then has stage1 compile
-`selfhost/` again (stage2) and requires identical C output (the fixpoint). The layout
-below describes `src/`; `selfhost/` mirrors it file for file (`.hmm`/`.dmm` → `.strata`).
+**The compiler is written in Strata** (since v1.0.0; it was originally written in D--, now
+in `archive/`). `build.ps1` bootstraps it: a pinned `stratac` release (stage0, see
+`bootstrap.txt`) compiles `src/` (stage1), stage1 compiles `src/` again (stage2), and the
+two must emit identical C (the fixpoint).
 
 ```
 compiler/
 ├─ ARCHITECTURE.md      ← this file
 ├─ build.ps1            bootstraps + builds all artifacts into bin/ (2 exes + libstrata.dll)
-├─ src/                 the frozen D-- bootstrap seed:
+├─ bootstrap.txt        the release version stage0 is pinned to
+├─ src/
 │  │  ── the CORE (no main; the "library") ──
-│  ├─ token.hmm         shared data: token kinds + Token struct
-│  ├─ ast.hmm           shared data: node kinds (tagged union) + node structs
-│  ├─ lexer.dmm         text → tokens
-│  ├─ parser.dmm        tokens → AST
-│  ├─ checker.dmm       AST → validated/inferred AST
-│  ├─ codegen.dmm       typed AST → C
-│  ├─ core.dmm          umbrella include = the whole core, main-free
+│  ├─ token.strata      shared data: token kinds + Token struct
+│  ├─ ast.strata        shared data: node kinds (tagged union) + node structs, modules
+│  ├─ lexer.strata      text → tokens
+│  ├─ parser.strata     tokens → AST
+│  ├─ modules.strata    the module loader: files → one Program + module table
+│  ├─ checker.strata    AST → validated/inferred AST (incl. module visibility)
+│  ├─ codegen.strata    typed AST → C
+│  ├─ core.strata       umbrella module (`export import`s every phase), main-free
 │  │  ── shared front-end utility ──
-│  ├─ dump.dmm          renders core data (tokens/AST) to text
-│  │  ── front-ends (thin; each has a main) ──
-│  ├─ stratac.dmm        front-end #1: the CLI (tokens, ast, ...)
-│  └─ console.dmm       front-end #2: the explorer console
+│  ├─ dump.strata       renders core data (tokens/AST) to text
+│  │  ── front-ends (thin; each has top-level code = its main) ──
+│  ├─ stratac.strata    front-end #1: the CLI (tokens, ast, check, emit, build, run)
+│  └─ console.strata    front-end #2: the explorer console
 ├─ bin/                 build output: stratac.exe, console.exe, libstrata.dll
+├─ build/               bootstrap compilers (cached release + stage1/2)
 ├─ lib/                 the C runtime the OUTPUT links against (arena.h, math, prelude)
 ├─ examples/            sample .strata programs
-├─ selfhost/            THE COMPILER, in Strata (edit here; see HANDOFF.md)
-├─ build/               bootstrap stage compilers stage0/1/2 (build output, gitignored)
-└─ tests/              golden-file tests, one dir per stage (tokens/, ast/, ...)
+└─ tests/              golden-file tests, one dir per stage (tokens/, ast/, check/, run/, emit/)
 ```
 
-- `.hmm` = shared **data** definitions (headers). `.dmm` = **behavior** (passes).
-- **The core (`core.dmm` and everything it includes) has no `main`.** Front-ends
+- The data modules (`token`, `ast`) hold shared definitions; the others are passes.
+- **The core (`core.strata` and everything it re-exports) has no `main`.** Front-ends
   (`stratac`, `console`, the DLL) include the core and add the shell. This is the
   exe/lib/LSP split from §11, in force from day one.
-- **If any `.dmm` phase file grows past ~1000 lines, that's the signal to split it by
+- **If any phase file grows past ~1000 lines, that's the signal to split it by
   concern** (e.g. `checker` → name-resolution + type-check), never to cram more in.
 
 ---
 
 ## 3. The phases (each: reads → produces, and what it must NOT do)
 
-### Lexer — `lexer.dmm`
+### Lexer — `lexer.strata`
 - **Reads** source text. **Produces** a flat token stream.
 - Handles: keywords, identifiers, literals, operators, newline-as-terminator, comments.
 - **Must NOT** know about grammar, types, or the AST. Only characters → tokens.
 
-### Parser — `parser.dmm`
+### Parser — `parser.strata`
 - **Reads** tokens. **Produces** the AST. **Recursive descent** (readable, hand-written,
   matches D--).
 - This is where **surface sugar desugars**: top-level statements are collected into an
   implicit entry point; `f(x) = expr` becomes a normal function body.
 - **Must NOT** resolve names, check types, or touch C. It only builds tree shape.
 
-### Checker — `checker.dmm`  (a.k.a. sema)
+### Checker — `checker.strata`  (a.k.a. sema)
 - **Reads** the AST. **Produces** a typed/annotated AST + symbol tables.
 - Does: **name resolution** (scopes), **type checking**, **`var` inference**,
   **default/named-argument resolution** (at the call site), **method/UFCS resolution**
@@ -108,14 +107,14 @@ compiler/
 - Reports **all** errors (recovering, not stopping at the first — D--'s practice).
 - **Must NOT** emit C. Its job is to make the AST correct and fully typed.
 
-### Codegen — `codegen.dmm`
+### Codegen — `codegen.strata`
 - **Reads** the typed AST. **Produces** C source text (readable C).
 - Emits: functions, structs, tagged unions (`struct { tag; union; }`), `match` → `switch`,
   arena calls, monomorphized generic instantiations, vector-math calls.
 - **Must NOT** make decisions the checker should have made. If codegen needs to "figure
   something out," that logic belongs in the checker. Codegen is a **pure translation.**
 
-### Driver — `stratac.dmm`
+### Driver — `stratac.strata`
 - CLI + orchestration **only**. Reads a file, runs the passes in order, invokes the C
   compiler, runs the binary. **Zero language logic lives here.**
 
@@ -129,8 +128,8 @@ compiler/
 
 Phases only ever communicate through these. Get them right and the passes fall out.
 
-- **Token** (`token.hmm`) — kind + text + source span.
-- **AST node** (`ast.hmm`) — a **tagged union**: a `kind` enum + the per-kind data.
+- **Token** (`token.strata`) — kind + text + source span.
+- **AST node** (`ast.strata`) — a **tagged union**: a `kind` enum + the per-kind data.
   Every pass traverses it with a `switch` on `kind`. **This is the spine — design it
   first.** (Polymorphism via tag + switch, *not* inheritance — D--'s explicit stance.)
 - **Type / Symbol / Scope** (checker-owned) — the tables name-resolution and typing build.
@@ -146,7 +145,7 @@ Phases only ever communicate through these. Get them right and the passes fall o
 2. **Data structures are the only contract.** No phase calls another phase's internals or
    shares mutable globals with it.
 3. **Unidirectional flow.** Later reads earlier; never the reverse. No cycles.
-4. **Thin driver.** All orchestration in `stratac.dmm`; no logic anywhere near it.
+4. **Thin driver.** All orchestration in `stratac.strata`; no logic anywhere near it.
 5. **Centralized diagnostics.** One module, source spans, error recovery — no scattered
    error handling, no panics inside passes.
 6. **Design the AST first.** It's the spine; node kinds drive every pass.
@@ -304,7 +303,7 @@ only the *installed toolchain* is monolithic. Built by `build.ps1`, deployed by
 
 ```
 %LOCALAPPDATA%\Programs\strata\   (per-user; -System → %ProgramFiles%\strata; -Prefix to override)
-├─ stratac.exe         the compiler CLI, self-hosted (stage2 of the bootstrap)
+├─ stratac.exe         the compiler CLI (stage2 of the bootstrap)
 ├─ console.exe        the explorer front-end
 ├─ libstrata.dll      the core as a shared library (for embedders)
 ├─ tcc.exe            BUNDLED — so `stratac run` needs no external toolchain   (with codegen)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/modules.strata - the module loader. Part of the compiler CORE.
+// src/modules.strata - the module loader. Part of the compiler CORE.
 //
 // Every .strata file is a module. `load_program(path)` parses the root file and, one file
 // at a time, every module it imports (recursively, each file once), and returns one

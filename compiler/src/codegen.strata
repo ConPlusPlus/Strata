@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/codegen.strata - the Strata code generator, written in Strata (translated from the D-- bootstrap seed; a MODULE, no main). CORE.
+// src/codegen.strata - the Strata code generator, written in Strata (originally ported from D--; a MODULE, no main). CORE.
 //
 // Milestone 1, step 3: the thin vertical slice. Turns the AST into plain C for the
 // subset that lets a program actually RUN end-to-end BEFORE the checker exists
@@ -28,7 +28,7 @@ string cg_strip_us(string s) {   // C rejects `_` digit separators; drop them
     return r
 }
 
-// A literal's text arrives as written in the source (see lexer.dmm), and every Strata
+// A literal's text arrives as written in the source (see lexer.strata), and every Strata
 // escape is a C escape, so it passes through. The one rewrite: `\0` becomes `\000`,
 // because in C a digit right after `\0` would extend it into a different octal escape.
 string cg_escape(string s) {

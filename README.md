@@ -46,8 +46,8 @@ for i in 0..60 {
   and an **arrow-key-driven sprite** ([`sprite.strata`](compiler/examples/sprite.strata), movement
   computed with Strata's own `vec2` math) build to single native binaries
 - ✅ `cast<T>(x)`, `sizeof(T)`, string/file built-ins (`substr`, `read_file`, `args()`, ...)
-- ✅ **self-hosted**: `stratac` is written in Strata ([`compiler/selfhost/`](compiler/selfhost/)),
-  bootstrapped from a frozen D-- seed and verified to reproduce itself byte-for-byte
+- ✅ **self-hosted**: `stratac` is written in Strata ([`compiler/src/`](compiler/src/)),
+  bootstrapped from a pinned release and verified to reproduce itself byte-for-byte
 - ✅ syntax highlighting for VS Code and Visual Studio ([`editors/`](editors/))
 - ⏳ next: tagged unions + pattern matching, SoA arrays, hot-reload
 
@@ -66,12 +66,12 @@ Strata.md   the founding project plan
 
 ## Build & run
 
-Requires a C compiler (`gcc`), and the D-- compiler (`dec`) to bootstrap. See
-[`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) for the toolchain. To just *use*
-Strata, grab a release zip instead; it needs only `gcc`.
+Requires a C compiler (`gcc`). The build downloads a pinned `stratac` release once to
+bootstrap from (see `compiler/bootstrap.txt`). To just *use* Strata, grab a release zip,
+or run `compiler\install.ps1`.
 
 ```powershell
-# bootstrap (D-- seed -> stratac -> stratac) and build stratac.exe, console.exe,
+# bootstrap (pinned release -> stratac -> stratac) and build stratac.exe, console.exe,
 # libstrata.dll into compiler\bin\
 powershell -ExecutionPolicy Bypass -File compiler\build.ps1
 

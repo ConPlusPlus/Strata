@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/parser.strata - the Strata parser, written in Strata (translated from the D-- bootstrap seed; a MODULE, no main). CORE.
+// src/parser.strata - the Strata parser, written in Strata (originally ported from D--; a MODULE, no main). CORE.
 //
-// Milestone 1, step 2. Recursive descent: Token[] -> ast.hmm nodes. Included by the
+// Milestone 1, step 2. Recursive descent: Token[] -> ast.strata nodes. Included by the
 // core; front-ends print the tree via `strata ast`.
 //
 // Strata grammar vs D--'s parser:
@@ -16,7 +16,7 @@
 //   * `..` is a range operator (loosest expression precedence), for `for i in 0..n`.
 //   * top-level items are struct/enum/function decls OR statements (-> implicit main).
 
-// lex() + Token/TokKind (via token.hmm)
+// lex() + Token/TokKind (via token.strata)
 import lexer
 // the AST node types + new_* constructors
 import ast

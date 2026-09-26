@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/core.strata - the Strata compiler CORE, as one umbrella include.
+// src/core.strata - the Strata compiler CORE, as one umbrella include.
 //
 // This IS "the compiler as a library": the phases (lexer -> parser -> checker ->
 // codegen) with NO main. Every front-end (the `strata` CLI, the `console`, a future

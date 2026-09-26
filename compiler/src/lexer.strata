@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright © 2026 Connor Rutberg
 //
-// selfhost/lexer.strata - the Strata lexer, written in Strata (translated from the D-- bootstrap seed; a MODULE, no main).
+// src/lexer.strata - the Strata lexer, written in Strata (originally ported from D--; a MODULE, no main).
 //
 // Milestone 1, step 1. `lex(src)` turns Strata source text into a Token[].
-// Included by the driver (strata.dmm) and later by parser.dmm.
+// Imported by the parser.
 //
 // Structure mirrors D--'s proven lexer. Strata-specific behaviour:
 //   * `..` range operator.

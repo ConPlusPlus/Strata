@@ -9,8 +9,8 @@
 #
 #     python editors/build_grammar.py
 #
-# Keep the word lists in sync with compiler/src/lexer.dmm (keywords) and
-# compiler/src/checker.dmm (primitive types, built-in functions).
+# Keep the word lists in sync with compiler/src/lexer.strata (keywords) and
+# compiler/src/checker.strata (primitive types, built-in functions).
 
 import json, os
 
@@ -68,7 +68,7 @@ grammar = {
             {'name': 'comment.line.double-slash.strata', 'match': r'//.*$'},
             {'include': '#block-comment'},
         ]},
-        # block comments NEST in Strata (see lexer.dmm skip_trivia)
+        # block comments NEST in Strata (see lexer.strata skip_trivia)
         'block-comment': {
             'name': 'comment.block.strata',
             'begin': r'/\*', 'end': r'\*/',

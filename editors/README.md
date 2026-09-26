@@ -12,7 +12,7 @@ editors.
 
 The grammar is generated, so don't edit the JSON by hand:
 
-1. Edit `build_grammar.py`. Its word lists mirror `compiler/src/lexer.dmm` (keywords) and
-   `compiler/src/checker.dmm` (types, built-ins); update them when the language changes.
+1. Edit `build_grammar.py`. Its word lists mirror `compiler/src/lexer.strata` (keywords) and
+   `compiler/src/checker.strata` (types, built-ins); update them when the language changes.
 2. `python editors/build_grammar.py` writes `vscode/syntaxes/strata.tmLanguage.json`.
 3. Re-run the installer(s).

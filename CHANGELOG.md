@@ -5,7 +5,15 @@ All notable changes to Strata are recorded here. Versions follow
 and a GitHub Release.
 
 ## [Unreleased]
-- nothing yet.
+### Changed
+- **The compiler's Strata source moved to `compiler/src/`** (from `compiler/selfhost/`).
+  The D-- original and the D--→Strata translator are retired to
+  `archive/dminusminus-seed/`.
+- **The build no longer needs D--.** `build.ps1` bootstraps from a pinned `stratac`
+  release (`compiler/bootstrap.txt`, now 1.1.0), downloaded once and cached. It falls
+  back to the installed `stratac` when offline; `-Bootstrap <exe>` overrides. The
+  fixpoint check (stage1 and stage2 emit identical C) still gates every build.
+- Tests: the token-parity check against the D-- seed is gone with the seed (43 checks).
 
 ## [1.1.0] - 2026-09-26
 ### Added

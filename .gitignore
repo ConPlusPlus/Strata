@@ -1,9 +1,8 @@
 # --- build artifacts -------------------------------------------------------
-# The compiler is written in D--; `dec` emits a <stem>.c next to each .dmm it builds,
-# then a native exe. `stratac run/build` emit <stem>.c/.exe next to the .strata source.
-# None of that is source — only the .dmm/.hmm/.strata files are.
+# `stratac build/run` emit <stem>.c/.exe next to the .strata source. None of that is
+# source; only the .strata files are.
 
-# dec-generated C from building the compiler modules
+# stratac output beside the compiler's own sources (build.ps1 builds src/stratac.strata)
 compiler/src/*.c
 compiler/src/*.exe
 
@@ -11,13 +10,13 @@ compiler/src/*.exe
 compiler/examples/*.c
 compiler/examples/*.exe
 
-# stratac output beside the self-hosted (Strata-written) compiler
-compiler/selfhost/*.c
-compiler/selfhost/*.exe
+# old D-- build output left in the archived bootstrap seed
+archive/dminusminus-seed/src/*.c
+archive/dminusminus-seed/src/*.exe
 
 # build output directory (stratac.exe, console.exe, libstrata.dll, libstrata.c)
 compiler/bin/
-# bootstrap stage compilers (stage0/1/2, see compiler/build.ps1)
+# bootstrap: the cached pinned release + stage1/2 compilers (see compiler/build.ps1)
 compiler/build/
 
 # packaged release archives (uploaded to GitHub Releases, not committed)
