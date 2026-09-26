@@ -229,6 +229,8 @@ TokKind keyword_kind(string w) {
     if (w == "export")  { return TkKwExport; }
     if (w == "cast")    { return TkKwCast; }
     if (w == "sizeof")  { return TkKwSizeof; }
+    if w == "break"     { return TkKwBreak }
+    if w == "continue"  { return TkKwContinue }
     return TkIdent
 }
 
@@ -297,7 +299,7 @@ Token scan_token(Lexer* l) {
 bool ends_statement(TokKind k) {
     switch (k) {
         case TkIdent, TkInt, TkFloat, TkString, TkChar,
-             TkKwTrue, TkKwFalse, TkKwReturn,
+             TkKwTrue, TkKwFalse, TkKwReturn, TkKwBreak, TkKwContinue,
              TkRParen, TkRBracket, TkRBrace:
             return true
         default:
@@ -377,6 +379,8 @@ export string kind_name(TokKind k) {
         case TkKwExport:  return "export"
         case TkKwCast:    return "cast"
         case TkKwSizeof:  return "sizeof"
+        case TkKwBreak:   return "break"
+        case TkKwContinue: return "continue"
         case TkLParen:    return "("
         case TkRParen:    return ")"
         case TkLBrace:    return "{"

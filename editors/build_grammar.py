@@ -14,7 +14,7 @@
 
 import json, os
 
-KEYWORDS_CONTROL = ['if', 'else', 'while', 'for', 'in', 'return', 'switch', 'case', 'default']
+KEYWORDS_CONTROL = ['if', 'else', 'while', 'for', 'in', 'return', 'break', 'continue', 'switch', 'case', 'default']
 KEYWORDS_MEMORY  = ['region']
 KEYWORDS_OPS     = ['cast', 'sizeof']
 STORAGE          = ['var', 'const', 'struct', 'enum', 'export']

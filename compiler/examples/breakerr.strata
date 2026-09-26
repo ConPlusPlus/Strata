@@ -1,0 +1,10 @@
+// breakerr.strata - break / continue only inside loops
+break
+int f(int x) {
+    switch x {
+        case 1: break
+        default: continue
+    }
+    return x
+}
+print(f(1))

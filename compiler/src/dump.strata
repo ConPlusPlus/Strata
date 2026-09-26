@@ -96,6 +96,8 @@ void pr_stmt(int ind, Stmt* s) {
             }
         case StReturn:   pr(ind, "Return"); if (s.expr != null) { pr_expr(ind + 1, s.expr); }
         case StExprStmt: pr(ind, "ExprStmt"); pr_expr(ind + 1, s.expr)
+        case StBreak:    pr(ind, "Break")
+        case StContinue: pr(ind, "Continue")
         case StAssign:
             pr(ind, "Assign " + s.op)
             pr(ind + 1, "target:"); pr_expr(ind + 2, s.target)

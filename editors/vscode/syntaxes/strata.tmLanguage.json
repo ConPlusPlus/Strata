@@ -252,7 +252,7 @@
       "patterns": [
         {
           "name": "keyword.control.strata",
-          "match": "\\b(if|else|while|for|in|return|switch|case|default)\\b"
+          "match": "\\b(if|else|while|for|in|return|break|continue|switch|case|default)\\b"
         },
         {
           "name": "keyword.other.region.strata",

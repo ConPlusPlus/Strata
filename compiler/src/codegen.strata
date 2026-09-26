@@ -20,11 +20,61 @@ import ast
 // Output is collected as a list of pieces and joined once at the end: appending to one
 // growing string copies all of it every time (Strata strings are immutable C strings),
 // which made big programs take gigabytes.
-export struct Codegen { string[dynamic] parts; bool had_error; bool no_main; }   // no_main: building a dll
+export struct Codegen {
+    string[dynamic] parts
+    bool            had_error
+    bool            no_main// building a dll
+    // where the statement being generated sits, for break / continue / return:
+    string[dynamic] regions// C names of the regions it's inside (innermost last)
+    int[dynamic]    loop_regions// per enclosing loop: how many regions were open at its start
+    int[dynamic]    loop_switches// per enclosing loop: the switch depth at its start
+    int[dynamic]    loop_labels// per enclosing loop: its label number
+    int[dynamic]    loop_label_used// per enclosing loop: did a break need its label?
+    int             switch_depth
+    int             labels// label numbers handed out
+    string          ret_c// the current function's C return type
+}
 
 export Codegen new_codegen() {
     string[dynamic] parts = []
-    return Codegen{ parts, false, false }
+    string[dynamic] regions = []
+    int[dynamic] lr = []
+    int[dynamic] ls = []
+    int[dynamic] ll = []
+    int[dynamic] lu = []
+    return Codegen{ parts, false, false, regions, lr, ls, ll, lu, 0, 0, "void" }
+}
+
+// C to free the regions opened since `from` (innermost first).
+string region_frees(Codegen* cg, int from, int ind) {
+    string r = ""
+    int k = cg.regions.len - 1
+    while k >= from {
+        r = r + cg_indent(ind) + "arena_free(&" + cg.regions[k] + ");\n"
+        k -= 1
+    }
+    return r
+}
+
+// Enter / leave a loop: its body's break / continue need to know which regions and
+// switches they'd be leaving. (Arrays shrink by lowering .len: a stack.)
+void loop_enter(Codegen* cg) {
+    cg.loop_regions.push(cg.regions.len)
+    cg.loop_switches.push(cg.switch_depth)
+    cg.labels += 1
+    cg.loop_labels.push(cg.labels)
+    cg.loop_label_used.push(0)
+}
+// Leaves the loop; returns the C label to put after it ("" if no break needed one).
+string loop_leave(Codegen* cg, int ind) {
+    int top = cg.loop_labels.len - 1
+    string label = ""
+    if cg.loop_label_used[top] == 1 { label = cg_indent(ind) + "strata_break_" + int_to_str(cg.loop_labels[top]) + ": ;\n" }
+    cg.loop_regions.len = top
+    cg.loop_switches.len = top
+    cg.loop_labels.len = top
+    cg.loop_label_used.len = top
+    return label
 }
 
 void cg_out(Codegen* cg, string s) { cg.parts.push(s) }
@@ -318,8 +368,31 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                 }
             }
         case StReturn:
-            if (s.expr != null) { cg_out(cg, cg_indent(ind) + "return " + gen_expr(cg, s.expr) + ";\n"); }
-            else                { cg_out(cg, cg_indent(ind) + "return;\n"); }
+            if cg.regions.len == 0 {
+                if (s.expr != null) { cg_out(cg, cg_indent(ind) + "return " + gen_expr(cg, s.expr) + ";\n"); }
+                else                { cg_out(cg, cg_indent(ind) + "return;\n"); }
+            } else if s.expr != null {
+                // inside region(s): compute the value, free the regions, then return it
+                cg_out(cg, cg_indent(ind) + "{ " + cg.ret_c + " _ret = " + gen_expr(cg, s.expr) + ";\n")
+                cg_out(cg, region_frees(cg, 0, ind + 1))
+                cg_out(cg, cg_indent(ind + 1) + "return _ret; }\n")
+            } else {
+                cg_out(cg, cg_indent(ind) + "{\n" + region_frees(cg, 0, ind + 1) + cg_indent(ind + 1) + "return; }\n")
+            }
+        case StBreak, StContinue:
+            {
+                int top = cg.loop_labels.len - 1
+                // leaving the loop's body: free the regions opened inside it
+                cg_out(cg, region_frees(cg, cg.loop_regions[top], ind))
+                if s.kind == StContinue { cg_out(cg, cg_indent(ind) + "continue;\n") }
+                else if cg.switch_depth > cg.loop_switches[top] {
+                    // a C `break` here would only leave the switch: jump past the loop
+                    cg.loop_label_used[top] = 1
+                    cg_out(cg, cg_indent(ind) + "goto strata_break_" + int_to_str(cg.loop_labels[top]) + ";\n")
+                } else {
+                    cg_out(cg, cg_indent(ind) + "break;\n")
+                }
+            }
         case StExprStmt:
             cg_out(cg, cg_indent(ind) + gen_expr(cg, s.expr) + ";\n")
         case StAssign:
@@ -354,24 +427,31 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
             }
         case StWhile:
             cg_out(cg, cg_indent(ind) + "while (" + gen_expr(cg, s.cond) + ") ")
+            loop_enter(cg)
             gen_braced(cg, ind, s.body); cg_out(cg, "\n")
+            cg_out(cg, loop_leave(cg, ind))
         case StForIn:
             if (s.iter != null && s.iter.kind == ExBinary && s.iter.text == "..") {
                 string lo = gen_expr(cg, s.iter.a)
                 string hi = gen_expr(cg, s.iter.b)
                 cg_out(cg, cg_indent(ind) + "for (int64_t " + s.name + " = " + lo + "; " +
                            s.name + " < " + hi + "; " + s.name + "++) ")
+                loop_enter(cg)
                 gen_braced(cg, ind, s.body); cg_out(cg, "\n")
+                cg_out(cg, loop_leave(cg, ind))
             } else if (cg_is_dynarr_rt(s.iter.rtype)) {
                 string elemc = cg_dynarr_elem(s.iter.rtype)
                 string arrx = gen_expr(cg, s.iter)
                 cg_out(cg, cg_indent(ind) + "{ Array _arr = " + arrx + ";\n")
                 cg_out(cg, cg_indent(ind + 1) + "for (int64_t _i = 0; _i < _arr.len; _i++) {\n")
                 cg_out(cg, cg_indent(ind + 2) + elemc + " " + s.name + " = ((" + elemc + "*)_arr.data)[_i];\n")
+                loop_enter(cg)
                 if (s.body != null && s.body.kind == StBlock) {
                     for i in 0..s.body.stmts.len { gen_stmt(cg, ind + 2, s.body.stmts[i]); }
                 }
+                string label = loop_leave(cg, ind + 1)
                 cg_out(cg, cg_indent(ind + 1) + "}\n")
+                cg_out(cg, label)
                 cg_out(cg, cg_indent(ind) + "}\n")
             } else {
                 cg.had_error = true
@@ -379,6 +459,7 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
             }
         case StSwitch:
             cg_out(cg, cg_indent(ind) + "switch (" + gen_expr(cg, s.subject) + ") {\n")
+            cg.switch_depth += 1
             for i in 0..s.cases.len {
                 SwitchCase sc = s.cases[i]
                 if (sc.is_default) {
@@ -395,16 +476,24 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                 cg_out(cg, cg_indent(ind + 2) + "break;\n")
                 cg_out(cg, cg_indent(ind + 1) + "}\n")
             }
+            cg.switch_depth -= 1
             cg_out(cg, cg_indent(ind) + "}\n")
         case StRegion:
             {
                 string rname = s.name
-                if (rname.len == 0) { rname = "_region"; }
+                if (rname.len == 0) {
+                    // nested anonymous regions get distinct names, so an inner one can still
+                    // free the outer ones (break / return)
+                    rname = "_region"
+                    if cg.regions.len > 0 { rname = "_region" + int_to_str(cg.regions.len + 1) }
+                }
                 cg_out(cg, cg_indent(ind) + "{\n")
                 cg_out(cg, cg_indent(ind + 1) + "Arena " + rname + " = arena_make();\n")
+                cg.regions.push(rname)
                 if (s.body != null && s.body.kind == StBlock) {
                     for i in 0..s.body.stmts.len { gen_stmt(cg, ind + 1, s.body.stmts[i]); }
                 }
+                cg.regions.len = cg.regions.len - 1
                 cg_out(cg, cg_indent(ind + 1) + "arena_free(&" + rname + ");\n")
                 cg_out(cg, cg_indent(ind) + "}\n")
             }
@@ -495,6 +584,7 @@ void gen_types(Codegen* cg, Program prog) {
 }
 
 void gen_function(Codegen* cg, Decl* d, string prefix) {
+    cg.ret_c = ty_to_c(d.ret)
     cg_out(cg, prefix + func_sig(d) + " ")
     gen_braced(cg, 0, d.body)
     cg_out(cg, "\n\n")
@@ -503,6 +593,7 @@ void gen_function(Codegen* cg, Decl* d, string prefix) {
 // top-level code = main (a dll has none)
 void gen_main(Codegen* cg, Program prog) {
     if !cg.no_main {
+        cg.ret_c = "int"
         cg_out(cg, "int main(int strata_argc_, char** strata_argv_) {\n")
         cg_out(cg, "    strata_set_args(strata_argc_, strata_argv_);\n")
         for i in 0..prog.main.len { gen_stmt(cg, 1, prog.main[i]); }

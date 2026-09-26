@@ -1,0 +1,3 @@
+breakerr.strata:5:17: error: 'break' is only allowed inside a loop
+breakerr.strata:6:18: error: 'continue' is only allowed inside a loop
+breakerr.strata:2:1: error: 'break' is only allowed inside a loop

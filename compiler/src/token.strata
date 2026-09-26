@@ -21,7 +21,7 @@ export enum TokKind {
     TkKwIf, TkKwElse, TkKwWhile, TkKwFor, TkKwIn, TkKwReturn,
     TkKwTrue, TkKwFalse, TkKwRegion, TkKwImport, TkKwLink,
     TkKwSwitch, TkKwCase, TkKwDefault, TkKwExport,
-    TkKwCast, TkKwSizeof,
+    TkKwCast, TkKwSizeof, TkKwBreak, TkKwContinue,
     TkLParen, TkRParen, TkLBrace, TkRBrace, TkLBracket, TkRBracket,
     TkComma, TkSemicolon, TkColon, TkDot, TkDotDot, TkHash,
     TkAssign, TkPlus, TkMinus, TkStar, TkSlash, TkPercent,

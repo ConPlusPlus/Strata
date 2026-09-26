@@ -121,6 +121,7 @@ export struct Checker {
     // shared result-type nodes for named types (see ck_node)
     TypeNode*[dynamic] nodes
     NameIdx      node_idx
+    int          loop_depth// loops around the statement being checked (break/continue)
     // shared Types for the primitives (Types are never modified, so one of each will do)
     Type*        t_int
     Type*        t_bool
@@ -1005,7 +1006,9 @@ void ck_stmt(Checker* c, Stmt* s) {
             {
                 Type* cd = ck_expr(c, s.cond)
                 if (cd.cat != TcBool && !t_is_unknown(cd)) { ck_error(c, s.line, s.col, "while condition must be bool, got " + t_str(cd)); }
+                c.loop_depth += 1
                 ck_block(c, s.body)
+                c.loop_depth -= 1
             }
         case StForIn:
             {
@@ -1031,7 +1034,9 @@ void ck_stmt(Checker* c, Stmt* s) {
                 }
                 ck_push(c)
                 ck_declare(c, s.name, elemT, false, s.line, s.col)
+                c.loop_depth += 1
                 ck_block(c, s.body)
+                c.loop_depth -= 1
                 ck_pop(c)
             }
         case StRegion:
@@ -1058,6 +1063,14 @@ void ck_stmt(Checker* c, Stmt* s) {
                     ck_block(c, sc.body)
                 }
             }
+        case StBreak, StContinue:
+            {
+                if c.loop_depth == 0 {
+                    string word = "break"
+                    if s.kind == StContinue { word = "continue" }
+                    ck_error(c, s.line, s.col, "'" + word + "' is only allowed inside a loop")
+                }
+            }
         default:
             {
             }
@@ -1068,6 +1081,7 @@ void ck_stmt(Checker* c, Stmt* s) {
 // carry C names by then, so they must not be resolved a second time).
 void ck_func(Checker* c, Decl* f, int fi) {
     c.cur_ret = c.funcs[fi].ret
+    c.loop_depth = 0
     ck_push(c)
     for i in 0..f.params.len {
         ck_declare(c, f.params[i].name, c.funcs[fi].params[i], false, f.line, f.col)
@@ -1299,7 +1313,7 @@ export Checker* new_checker(string file) {
     NameEntry[dynamic]  names = []
     TypeNode*[dynamic]  nodes = []
     return alloc(Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void"), mods, 0, names,
-                          new_idx(0), new_idx(0), new_idx(0), new_idx(0), new_idx(0), new_idx(0), nodes, new_idx(0),
+                          new_idx(0), new_idx(0), new_idx(0), new_idx(0), new_idx(0), new_idx(0), nodes, new_idx(0), 0,
                           ty(TcInt, "int"), ty(TcBool, "bool"), ty(TcFloat, "float"), ty(TcStr, "string"),
                           ty(TcVoid, "void"), ty(TcUnknown, "?"), ty(TcChar, "char") })
 }

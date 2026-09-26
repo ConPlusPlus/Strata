@@ -1,0 +1,72 @@
+// loops.strata - break and continue
+enum Cmd { Go, Skip, Stop }
+struct Box { int v }
+
+// while + break
+var n = 0
+while true {
+    n += 1
+    if n == 5 { break }
+}
+print(n)                          // 5
+
+// for + continue: sum of odd numbers below 10
+var odd = 0
+for i in 0..10 {
+    if i % 2 == 0 { continue }
+    odd += i
+}
+print(odd)                        // 25
+
+// for-in over an array + break
+var found = 0 - 1
+var xs = [4, 8, 15, 16, 23, 42]
+for x in xs {
+    if x > 10 { found = x; break }
+}
+print(found)                      // 15
+
+// nested loops: break leaves only the inner one
+var pairs = 0
+for a in 0..4 {
+    for b in 0..4 {
+        if b > a { break }
+        pairs += 1
+    }
+}
+print(pairs)                      // 10
+
+// break / continue inside a switch act on the LOOP (switch has no fall-through)
+var steps = 0
+var cmds = [Go, Skip, Go, Stop, Go]
+for c in cmds {
+    switch c {
+        case Skip: continue
+        case Stop: break
+        default:   steps += 1
+    }
+}
+print(steps)                      // 2
+
+// break / continue out of a region free it (no leak), in a loop
+var made = 0
+for i in 0..6 {
+    region scratch {
+        var p = scratch.new(Box)
+        made += 1
+        if i == 1 { continue }
+        if i == 4 { break }
+    }
+}
+print(made)                       // 5
+
+// return from inside nested regions frees them too
+int deep(int k) {
+    region {
+        region {
+            if k > 0 { return k * 2 }
+        }
+    }
+    return 0
+}
+print(deep(21))                   // 42

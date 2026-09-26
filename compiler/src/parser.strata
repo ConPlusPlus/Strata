@@ -419,6 +419,12 @@ Stmt* statement(Parser* p) {
         case TkKwFor:    return for_stmt(p)
         case TkKwRegion: return region_stmt(p)
         case TkKwSwitch: return switch_stmt(p)
+        case TkKwBreak, TkKwContinue:
+            {
+                Token kw = p_advance(p)
+                if kw.kind == TkKwBreak { return new_stmt(StBreak, kw.line, kw.col) }
+                return new_stmt(StContinue, kw.line, kw.col)
+            }
         case TkLBrace:   return block(p)
         case TkKwVar, TkKwConst: return var_decl_core(p)
         default:
