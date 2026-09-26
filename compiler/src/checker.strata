@@ -1070,11 +1070,12 @@ void ck_name_conflicts(Checker* c) {
                 ck_error(c, b.line, b.col, "'" + b.name + "' is also exported by " + c.mods[a.module].file + " (exported names must be unique across the program)")
             }
         }
+        bool reported = false
         for i in 0..c.names.len {
             NameEntry o = c.names[i]
-            if !b.exported && o.name == b.name && o.module != b.module && o.exported && ck_sees(c, o.module, true) {
+            if !reported && !b.exported && o.name == b.name && o.module != b.module && o.exported && ck_sees(c, o.module, true) {
                 ck_error(c, b.line, b.col, "'" + b.name + "' conflicts with the '" + b.name + "' exported by " + c.mods[o.module].file + ", which this file imports")
-                break
+                reported = true
             }
         }
     }

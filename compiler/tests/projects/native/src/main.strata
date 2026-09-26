@@ -1,0 +1,5 @@
+import <mathx.h>
+import game.util
+print(mathx_scale(4))     // 40: MATHX_SCALE comes from [build] defines
+print(mathx_clock_ok())   // 1: winmm linked via [windows]
+print(double_it(21))      // 42: a module in a subfolder

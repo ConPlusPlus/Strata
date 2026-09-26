@@ -5,6 +5,34 @@ All notable changes to Strata are recorded here. Versions follow
 and a GitHub Release.
 
 ## [Unreleased]
+- nothing yet.
+
+## [1.2.0] - 2026-09-26
+### Added
+- **Build system: projects.** A `strata.toml` project file (a small TOML subset) sets
+  the name, entry file and output (`exe` or **`dll`**), plus `[build]` defines,
+  include/library folders, extra **C source files** and libraries. `[windows]` /
+  `[linux]` / `[macos]` sections set per-platform libraries (and macOS frameworks),
+  which `link` in source can't express. Unknown keys and sections are errors.
+- **Build cache.** A project build fingerprints everything that affects the binary
+  (generated C, the gcc command, extra C sources, the compiler version) and skips gcc
+  when nothing changed: `up to date: build/game.exe`. `--force` rebuilds.
+- **Commands:** `stratac new <name>` scaffolds a project. `stratac build` / `run` /
+  `check` / `emit` take a project folder, a `strata.toml`, a `.strata` file, or nothing
+  (the project in the current folder). `--release` builds `-O2` (default `-O0 -g`);
+  `--` passes the remaining arguments to the program. Single `.strata` files build
+  exactly as before.
+- **DLL output:** `output = "dll"` builds a shared library with no `main`. Exported
+  functions are its entry points; an entry file with top-level code is an error.
+- Tests: `tests/projects/` (a native-C project, a dll, a bad project file), each also
+  checking that a second build is cached (46 checks).
+### Fixed
+- **Code generation used memory quadratic in program size.** A 12k-line program took
+  23 GB and 11 s to generate, and 16k lines crashed. Output is now collected as pieces
+  and joined once: 12k lines take 0.19 s and 38 MB, and 81k lines take 2.5 s and 241 MB.
+- The checker relied on C's `break` leaking through as an unknown name; rewritten
+  without it (Strata has no `break`/`continue` yet).
+
 ### Changed
 - **The compiler's Strata source moved to `compiler/src/`** (from `compiler/selfhost/`).
   The D-- original and the D--→Strata translator are retired to

@@ -1,0 +1,6 @@
+[project]
+name = "badtoml"
+ouput = "exe"
+[build]
+libs = "user32"
+[graphics]

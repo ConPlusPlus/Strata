@@ -49,6 +49,7 @@ for i in 0..60 {
 - ✅ **self-hosted**: `stratac` is written in Strata ([`compiler/src/`](compiler/src/)),
   bootstrapped from a pinned release and verified to reproduce itself byte-for-byte
 - ✅ syntax highlighting for VS Code and Visual Studio ([`editors/`](editors/))
+- ✅ **projects**: `stratac new`, a `strata.toml` (per-platform libraries, C sources, exe or dll), cached builds
 - ⏳ next: tagged unions + pattern matching, SoA arrays, hot-reload
 
 The compiler is called **`stratac`**. It is written in Strata and compiles to plain C.
@@ -77,6 +78,11 @@ powershell -ExecutionPolicy Bypass -File compiler\build.ps1
 
 # run a program
 compiler\bin\stratac.exe run compiler\examples\run1.strata
+
+# or make a project
+stratac new mygame
+cd mygame
+stratac run
 
 # install to %LOCALAPPDATA%\Programs\strata and add to PATH
 powershell -ExecutionPolicy Bypass -File compiler\install.ps1

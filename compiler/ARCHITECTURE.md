@@ -63,6 +63,9 @@ compiler/
 │  ├─ checker.strata    AST → validated/inferred AST (incl. module visibility)
 │  ├─ codegen.strata    typed AST → C
 │  ├─ core.strata       umbrella module (`export import`s every phase), main-free
+│  │  ── the build system (on top of the core) ──
+│  ├─ project.strata    reads strata.toml into a Project
+│  ├─ build.strata      the build pipeline (C -> gcc -> exe/dll) + the build cache
 │  │  ── shared front-end utility ──
 │  ├─ dump.strata       renders core data (tokens/AST) to text
 │  │  ── front-ends (thin; each has top-level code = its main) ──

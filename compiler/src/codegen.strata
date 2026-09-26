@@ -16,7 +16,34 @@
 import parser
 import ast
 
-export struct Codegen { string out; bool had_error; }
+// Output is collected as a list of pieces and joined once at the end: appending to one
+// growing string copies all of it every time (Strata strings are immutable C strings),
+// which made big programs take gigabytes.
+export struct Codegen { string[dynamic] parts; bool had_error; bool no_main; }   // no_main: building a dll
+
+export Codegen new_codegen() {
+    string[dynamic] parts = []
+    return Codegen{ parts, false, false }
+}
+
+void cg_out(Codegen* cg, string s) { cg.parts.push(s) }
+
+// Concatenate pieces pairwise, level by level: each level copies the text once, so the
+// total work is O(n log k) instead of O(n * k).
+string join_pieces(string[dynamic] pieces) {
+    if pieces.len == 0 { return "" }
+    string[dynamic] cur = pieces
+    while cur.len > 1 {
+        string[dynamic] next = []
+        int i = 0
+        while i < cur.len {
+            if i + 1 < cur.len { next.push(cur[i] + cur[i + 1]) } else { next.push(cur[i]) }
+            i += 2
+        }
+        cur = next
+    }
+    return cur[0]
+}
 
 // ---- helpers -----------------------------------------------------------
 
@@ -276,18 +303,18 @@ string gen_expr(Codegen* cg, Expr* e) {
 // ---- statements --------------------------------------------------------
 
 void gen_braced(Codegen* cg, int ind, Stmt* blk) {
-    cg.out = cg.out + "{\n"
+    cg_out(cg, "{\n")
     if (blk != null && blk.kind == StBlock) {
         for i in 0..blk.stmts.len { gen_stmt(cg, ind + 1, blk.stmts[i]); }
     }
-    cg.out = cg.out + cg_indent(ind) + "}"
+    cg_out(cg, cg_indent(ind) + "}")
 }
 
 void gen_stmt(Codegen* cg, int ind, Stmt* s) {
     if (s == null) { return; }
     switch (s.kind) {
         case StBlock:
-            cg.out = cg.out + cg_indent(ind); gen_braced(cg, ind, s); cg.out = cg.out + "\n"
+            cg_out(cg, cg_indent(ind)); gen_braced(cg, ind, s); cg_out(cg, "\n")
         case StVar:
             {
                 string ct = "__auto_type"
@@ -295,19 +322,19 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                 string head = ""
                 if (s.is_const) { head = "const "; }
                 if (s.init != null) {
-                    cg.out = cg.out + cg_indent(ind) + head + ct + " " + s.name + " = " + gen_expr(cg, s.init) + ";\n"
+                    cg_out(cg, cg_indent(ind) + head + ct + " " + s.name + " = " + gen_expr(cg, s.init) + ";\n")
                 } else if (s.type != null && s.type.kind == TyDynArray) {
                     // an uninitialized dynamic array starts empty (arena/heap not yet allocated)
-                    cg.out = cg.out + cg_indent(ind) + "Array " + s.name + " = arr_make(sizeof(" + ty_to_c(s.type.elem) + "));\n"
+                    cg_out(cg, cg_indent(ind) + "Array " + s.name + " = arr_make(sizeof(" + ty_to_c(s.type.elem) + "));\n")
                 } else {
-                    cg.out = cg.out + cg_indent(ind) + head + ct + " " + s.name + ";\n"
+                    cg_out(cg, cg_indent(ind) + head + ct + " " + s.name + ";\n")
                 }
             }
         case StReturn:
-            if (s.expr != null) { cg.out = cg.out + cg_indent(ind) + "return " + gen_expr(cg, s.expr) + ";\n"; }
-            else                { cg.out = cg.out + cg_indent(ind) + "return;\n"; }
+            if (s.expr != null) { cg_out(cg, cg_indent(ind) + "return " + gen_expr(cg, s.expr) + ";\n"); }
+            else                { cg_out(cg, cg_indent(ind) + "return;\n"); }
         case StExprStmt:
-            cg.out = cg.out + cg_indent(ind) + gen_expr(cg, s.expr) + ";\n"
+            cg_out(cg, cg_indent(ind) + gen_expr(cg, s.expr) + ";\n")
         case StAssign:
             {
                 // compound assignment on a vector lowers to `target = vecN_op(target, value)`
@@ -323,76 +350,76 @@ void gen_stmt(Codegen* cg, int ind, Stmt* s) {
                         else                             { rhs = vn + "_scale(" + tgt + ", " + val + ")"; }
                     }
                     else { cg.had_error = true; }
-                    cg.out = cg.out + cg_indent(ind) + tgt + " = " + rhs + ";\n"
+                    cg_out(cg, cg_indent(ind) + tgt + " = " + rhs + ";\n")
                 } else {
-                    cg.out = cg.out + cg_indent(ind) + gen_expr(cg, s.target) + " " + s.op + " " + gen_expr(cg, s.value) + ";\n"
+                    cg_out(cg, cg_indent(ind) + gen_expr(cg, s.target) + " " + s.op + " " + gen_expr(cg, s.value) + ";\n")
                 }
             }
         case StIf:
-            cg.out = cg.out + cg_indent(ind) + "if (" + gen_expr(cg, s.cond) + ") "
+            cg_out(cg, cg_indent(ind) + "if (" + gen_expr(cg, s.cond) + ") ")
             gen_braced(cg, ind, s.then_block)
             if (s.else_branch != null) {
-                cg.out = cg.out + " else "
-                if (s.else_branch.kind == StIf) { cg.out = cg.out + "\n"; gen_stmt(cg, ind, s.else_branch); }
-                else { gen_braced(cg, ind, s.else_branch); cg.out = cg.out + "\n"; }
+                cg_out(cg, " else ")
+                if (s.else_branch.kind == StIf) { cg_out(cg, "\n"); gen_stmt(cg, ind, s.else_branch); }
+                else { gen_braced(cg, ind, s.else_branch); cg_out(cg, "\n"); }
             } else {
-                cg.out = cg.out + "\n"
+                cg_out(cg, "\n")
             }
         case StWhile:
-            cg.out = cg.out + cg_indent(ind) + "while (" + gen_expr(cg, s.cond) + ") "
-            gen_braced(cg, ind, s.body); cg.out = cg.out + "\n"
+            cg_out(cg, cg_indent(ind) + "while (" + gen_expr(cg, s.cond) + ") ")
+            gen_braced(cg, ind, s.body); cg_out(cg, "\n")
         case StForIn:
             if (s.iter != null && s.iter.kind == ExBinary && s.iter.text == "..") {
                 string lo = gen_expr(cg, s.iter.a)
                 string hi = gen_expr(cg, s.iter.b)
-                cg.out = cg.out + cg_indent(ind) + "for (int64_t " + s.name + " = " + lo + "; " +
-                         s.name + " < " + hi + "; " + s.name + "++) "
-                gen_braced(cg, ind, s.body); cg.out = cg.out + "\n"
+                cg_out(cg, cg_indent(ind) + "for (int64_t " + s.name + " = " + lo + "; " +
+                           s.name + " < " + hi + "; " + s.name + "++) ")
+                gen_braced(cg, ind, s.body); cg_out(cg, "\n")
             } else if (cg_is_dynarr_rt(s.iter.rtype)) {
                 string elemc = cg_dynarr_elem(s.iter.rtype)
                 string arrx = gen_expr(cg, s.iter)
-                cg.out = cg.out + cg_indent(ind) + "{ Array _arr = " + arrx + ";\n"
-                cg.out = cg.out + cg_indent(ind + 1) + "for (int64_t _i = 0; _i < _arr.len; _i++) {\n"
-                cg.out = cg.out + cg_indent(ind + 2) + elemc + " " + s.name + " = ((" + elemc + "*)_arr.data)[_i];\n"
+                cg_out(cg, cg_indent(ind) + "{ Array _arr = " + arrx + ";\n")
+                cg_out(cg, cg_indent(ind + 1) + "for (int64_t _i = 0; _i < _arr.len; _i++) {\n")
+                cg_out(cg, cg_indent(ind + 2) + elemc + " " + s.name + " = ((" + elemc + "*)_arr.data)[_i];\n")
                 if (s.body != null && s.body.kind == StBlock) {
                     for i in 0..s.body.stmts.len { gen_stmt(cg, ind + 2, s.body.stmts[i]); }
                 }
-                cg.out = cg.out + cg_indent(ind + 1) + "}\n"
-                cg.out = cg.out + cg_indent(ind) + "}\n"
+                cg_out(cg, cg_indent(ind + 1) + "}\n")
+                cg_out(cg, cg_indent(ind) + "}\n")
             } else {
                 cg.had_error = true
-                cg.out = cg.out + cg_indent(ind) + "/* unsupported for-in iterable */\n"
+                cg_out(cg, cg_indent(ind) + "/* unsupported for-in iterable */\n")
             }
         case StSwitch:
-            cg.out = cg.out + cg_indent(ind) + "switch (" + gen_expr(cg, s.subject) + ") {\n"
+            cg_out(cg, cg_indent(ind) + "switch (" + gen_expr(cg, s.subject) + ") {\n")
             for i in 0..s.cases.len {
                 SwitchCase sc = s.cases[i]
                 if (sc.is_default) {
-                    cg.out = cg.out + cg_indent(ind + 1) + "default: {\n"
+                    cg_out(cg, cg_indent(ind + 1) + "default: {\n")
                 } else {
                     for j in 0..sc.values.len {
-                        cg.out = cg.out + cg_indent(ind + 1) + "case " + gen_expr(cg, sc.values[j]) + ":\n"
+                        cg_out(cg, cg_indent(ind + 1) + "case " + gen_expr(cg, sc.values[j]) + ":\n")
                     }
-                    cg.out = cg.out + cg_indent(ind + 1) + "{\n"
+                    cg_out(cg, cg_indent(ind + 1) + "{\n")
                 }
                 if (sc.body != null && sc.body.kind == StBlock) {
                     for j in 0..sc.body.stmts.len { gen_stmt(cg, ind + 2, sc.body.stmts[j]); }
                 }
-                cg.out = cg.out + cg_indent(ind + 2) + "break;\n"
-                cg.out = cg.out + cg_indent(ind + 1) + "}\n"
+                cg_out(cg, cg_indent(ind + 2) + "break;\n")
+                cg_out(cg, cg_indent(ind + 1) + "}\n")
             }
-            cg.out = cg.out + cg_indent(ind) + "}\n"
+            cg_out(cg, cg_indent(ind) + "}\n")
         case StRegion:
             {
                 string rname = s.name
                 if (rname.len == 0) { rname = "_region"; }
-                cg.out = cg.out + cg_indent(ind) + "{\n"
-                cg.out = cg.out + cg_indent(ind + 1) + "Arena " + rname + " = arena_make();\n"
+                cg_out(cg, cg_indent(ind) + "{\n")
+                cg_out(cg, cg_indent(ind + 1) + "Arena " + rname + " = arena_make();\n")
                 if (s.body != null && s.body.kind == StBlock) {
                     for i in 0..s.body.stmts.len { gen_stmt(cg, ind + 1, s.body.stmts[i]); }
                 }
-                cg.out = cg.out + cg_indent(ind + 1) + "arena_free(&" + rname + ");\n"
-                cg.out = cg.out + cg_indent(ind) + "}\n"
+                cg_out(cg, cg_indent(ind + 1) + "arena_free(&" + rname + ");\n")
+                cg_out(cg, cg_indent(ind) + "}\n")
             }
         default:
             cg.had_error = true
@@ -414,78 +441,80 @@ string func_sig(Decl* d) {
 }
 
 export string generate(Codegen* cg, Program prog) {
-    cg.out = cg.out + "// Generated by stratac. Do not edit.\n"
+    cg_out(cg, "// Generated by stratac. Do not edit.\n")
     // A Strata program is always ONE C file, so single-header C libraries may compile
     // their implementation here when they see this (e.g. lib/crossplatform.h).
-    cg.out = cg.out + "#define STRATA_PROGRAM 1\n"
-    cg.out = cg.out + "#include <stdint.h>\n"
-    cg.out = cg.out + "#include <stdbool.h>\n"
-    cg.out = cg.out + "#include <stdio.h>\n"
-    cg.out = cg.out + "#include <arena.h>\n"
-    cg.out = cg.out + "#include <smath.h>\n"
-    cg.out = cg.out + "#include <sstr.h>\n"
-    cg.out = cg.out + "#include <sio.h>\n"
-    cg.out = cg.out + "#include <sarr.h>\n"
-    cg.out = cg.out + "#include <sprelude.h>\n"
+    cg_out(cg, "#define STRATA_PROGRAM 1\n")
+    cg_out(cg, "#include <stdint.h>\n")
+    cg_out(cg, "#include <stdbool.h>\n")
+    cg_out(cg, "#include <stdio.h>\n")
+    cg_out(cg, "#include <arena.h>\n")
+    cg_out(cg, "#include <smath.h>\n")
+    cg_out(cg, "#include <sstr.h>\n")
+    cg_out(cg, "#include <sio.h>\n")
+    cg_out(cg, "#include <sarr.h>\n")
+    cg_out(cg, "#include <sprelude.h>\n")
 
     // imported C headers (interop)
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if (d.kind == DcInclude) {
-            if (d.is_system) { cg.out = cg.out + "#include <" + d.path + ">\n"; }
-            else             { cg.out = cg.out + "#include \"" + d.path + "\"\n"; }
+            if (d.is_system) { cg_out(cg, "#include <" + d.path + ">\n"); }
+            else             { cg_out(cg, "#include \"" + d.path + "\"\n"); }
         }
     }
-    cg.out = cg.out + "\n"
+    cg_out(cg, "\n")
 
     // enums -> C enums (members become C integer constants)
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if (d.kind == DcEnum) {
-            cg.out = cg.out + "typedef enum {"
-            for m in 0..d.members.len { if (m > 0) { cg.out = cg.out + ","; } cg.out = cg.out + " " + d.members[m]; }
-            cg.out = cg.out + " } " + d.name + ";\n"
+            cg_out(cg, "typedef enum {")
+            for m in 0..d.members.len { if (m > 0) { cg_out(cg, ","); } cg_out(cg, " " + d.members[m]); }
+            cg_out(cg, " } " + d.name + ";\n")
         }
     }
 
     // struct tags forward-declared first (so fields can reference any struct), then defined
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
-        if (d.kind == DcStruct) { cg.out = cg.out + "typedef struct " + d.name + " " + d.name + ";\n"; }
+        if (d.kind == DcStruct) { cg_out(cg, "typedef struct " + d.name + " " + d.name + ";\n"); }
     }
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if (d.kind == DcStruct) {
-            cg.out = cg.out + "struct " + d.name + " {\n"
+            cg_out(cg, "struct " + d.name + " {\n")
             for f in 0..d.fields.len {
-                cg.out = cg.out + "    " + ty_to_c(d.fields[f].type) + " " + d.fields[f].name + ";\n"
+                cg_out(cg, "    " + ty_to_c(d.fields[f].type) + " " + d.fields[f].name + ";\n")
             }
-            cg.out = cg.out + "};\n"
+            cg_out(cg, "};\n")
         }
     }
-    cg.out = cg.out + "\n"
+    cg_out(cg, "\n")
 
     // forward declarations (so functions can call each other / recurse)
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
-        if (d.kind == DcFunc) { cg.out = cg.out + func_sig(d) + ";\n"; }
+        if (d.kind == DcFunc) { cg_out(cg, func_sig(d) + ";\n"); }
     }
-    cg.out = cg.out + "\n"
+    cg_out(cg, "\n")
 
     // definitions
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if (d.kind == DcFunc) {
-            cg.out = cg.out + func_sig(d) + " "
+            cg_out(cg, func_sig(d) + " ")
             gen_braced(cg, 0, d.body)
-            cg.out = cg.out + "\n\n"
+            cg_out(cg, "\n\n")
         }
     }
 
-    // top-level code = main
-    cg.out = cg.out + "int main(int strata_argc_, char** strata_argv_) {\n"
-    cg.out = cg.out + "    strata_set_args(strata_argc_, strata_argv_);\n"
-    for i in 0..prog.main.len { gen_stmt(cg, 1, prog.main[i]); }
-    cg.out = cg.out + "    return 0;\n}\n"
-    return cg.out
+    // top-level code = main (a dll has none)
+    if !cg.no_main {
+        cg_out(cg, "int main(int strata_argc_, char** strata_argv_) {\n")
+        cg_out(cg, "    strata_set_args(strata_argc_, strata_argv_);\n")
+        for i in 0..prog.main.len { gen_stmt(cg, 1, prog.main[i]); }
+        cg_out(cg, "    return 0;\n}\n")
+    }
+    return join_pieces(cg.parts)
 }

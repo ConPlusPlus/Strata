@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 1.1.0** · tests: **43/43** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 1.2.0** · tests: **46/46** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -37,7 +37,7 @@ version is retired to `archive/dminusminus-seed/`.
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.1.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.2.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -87,14 +87,25 @@ Quick iteration on the compiler: `compiler\bin\stratac.exe build compiler\src\st
 
 **Use the compiler:**
 ```
-stratac tokens <file.strata>   # lexer output
-stratac ast    <file.strata>   # parsed AST
-stratac check  <file.strata>   # type-check only
-stratac emit   <file.strata>   # print the generated C
-stratac build  <file.strata>   # compile to a native .exe
-stratac run    <file.strata>   # compile and run
+stratac new    <name>                 # create a project: strata.toml + src/main.strata
+stratac run    [target] [--release] [--force] [-- args]   # build and run
+stratac build  [target] [--release] [--force]             # build an exe or dll
+stratac check  [target]               # type-check only
+stratac emit   [target]               # print the generated C
+stratac ast    <file.strata>          # parsed AST (one file)
+stratac tokens <file.strata>          # lexer output
 ```
-`stratac` finds its runtime `lib/` next to the executable (it passes `-I <lib>` to gcc).
+A *target* is a `.strata` file, a project folder, a `strata.toml`, or nothing (the project in
+the current folder). `stratac` finds its runtime `lib/` next to the executable (it passes
+`-I <lib>` to gcc).
+
+**Projects (`strata.toml`)**: see the comment at the top of `src/project.strata` for every
+key. The main ones:
+- `[project]`: `name`, `entry`, `output = "exe" | "dll"`, `out_dir`
+- `[build]`: `defines`, `include_dirs`, `lib_dirs`, `libs`, `c_sources`, `release`
+- `[windows]` / `[linux]` / `[macos]`: per-platform `libs` (etc.)
+
+Project builds are **cached** (`build/.strata-cache`): unchanged builds skip gcc.
 
 **Test** (rebuilds `stratac`, runs every golden byte-for-byte):
 ```
@@ -130,7 +141,9 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 | `codegen.strata` | typed AST → C. Reads `rtype` for operator overloading (`vec3_add`, `.`/`->`, etc.) |
 | `core.strata` | umbrella module: `export import`s every phase = the compiler CORE, **no `main`** (the "library") |
 | `dump.strata` | renders tokens/AST to text (front-end utility) |
-| `stratac.strata` | front-end #1: the CLI + orchestration (gcc invocation) |
+| `project.strata` | build system: reads `strata.toml` (a TOML subset) into a `Project` |
+| `build.strata` | build system: the pipeline (load → check → C → gcc/link), dll output, the cache |
+| `stratac.strata` | front-end #1: the CLI (targets, flags, `new`) |
 | `console.strata` | front-end #2: a tokens+AST explorer (proves the core is reusable) |
 
 **Key ideas:**
@@ -211,13 +224,16 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
 
 ## 6. Tests
 
-`run.ps1` runs **43 checks**:
+`run.ps1` runs **46 checks**:
 1. **bootstrap**: runs `build.ps1` (pinned release → stage1 → stage2 + the fixpoint check).
 2. **goldens**: `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
    against `bin/stratac.exe <stage> examples/<name>.strata`, using the self-hosted
    compiler. Stages: `tokens`, `ast`, `check`, `run`, and `emit`. The `emit` goldens pin
    the generated C for every example.
    Add a test by dropping a `.expected` file in the right folder.
+3. **projects**: each folder in `compiler/tests/projects/` is a real project. It's run
+   (or, for a dll, built) with `--force` and compared to its `expected.txt`, and a second
+   build must be cached ("up to date").
 
 ---
 
@@ -275,6 +291,25 @@ performance if the compiler starts building very large strings.
 ---
 
 ## 10. Roadmap
+
+**Agreed order (2026-09-26):** build system (1.2.0, done) → **public endpoints** (a real
+embedding C API + generated headers, shipped with the compiler, for engines) →
+**compiler speed + memory**.
+
+Known performance problems, for the optimization pass (measured on 12k–81k-line projects):
+- `s.len` is `strlen` (O(n)), so `for i in 0..s.len` re-scans the string on **every
+  iteration**. The range bound is re-evaluated each time; codegen should evaluate it once,
+  which is also the right semantics. This makes the lexer quadratic in *file* size: a
+  4k-line single file parses in 0.6 s, against 0.08 s for the same code split across files.
+- Strings are NUL-terminated and immutable, so building text by `a = a + b` copies.
+  A string builder (or length-carrying strings) is the real fix. Codegen already avoids it.
+- The arena abandons the rest of a block when an allocation doesn't fit.
+- Name lookups in the checker are linear scans. Fine at 2,000 functions, but a hash map
+  would be needed for very large programs.
+- No `break` / `continue` in the language yet.
+- Build step 2 (per-module C files + incremental gcc) and step 3 (`stratac watch`) are
+  designed (see the 2026-09 build-system discussion) but not built.
+
 
 - **Tagged unions + pattern matching** — model AST nodes / game events cleanly (pairs with `switch`).
 - **M4: SoA / `#soa` arrays** — the data-oriented layout layer.

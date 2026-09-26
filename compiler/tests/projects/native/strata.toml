@@ -1,0 +1,18 @@
+# a project using a C source file, an include folder, a define and per-platform libs
+[project]
+name  = "native"
+entry = "src/main.strata"
+
+[build]
+include_dirs = ["native"]
+c_sources    = ["native/mathx.c"]
+defines      = ["MATHX_SCALE=10"]
+
+[windows]
+libs = ["winmm"]     # timeGetTime; not linked by default, so this proves the section applies
+
+[linux]
+libs = ["X11"]       # must be ignored on Windows (linking it would fail)
+
+[macos]
+frameworks = ["Cocoa"]

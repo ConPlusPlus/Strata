@@ -1,0 +1,5 @@
+# a project that builds a dll
+[project]
+name   = "mathlib"
+entry  = "src/api.strata"
+output = "dll"

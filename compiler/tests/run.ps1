@@ -46,6 +46,34 @@ Get-ChildItem -Path $here -Directory | ForEach-Object {
     }
 }
 
+# --- projects (strata.toml): the build system ---------------------------------
+# tests/projects/<name>/ is a project. If it has expected.txt, `stratac run <dir> --force`
+# must print exactly that (a failing project's expected.txt holds its errors); otherwise
+# `stratac build <dir> --force` must succeed (e.g. a dll). Then, for projects that built,
+# a second `stratac build` must hit the cache ("up to date").
+Get-ChildItem -Path (Join-Path $here "projects") -Directory | ForEach-Object {
+    $dir = $_.FullName
+    $name = $_.Name
+    $expFile = Join-Path $dir "expected.txt"
+    $ok = $true
+    if (Test-Path $expFile) {
+        $actual   = ((& $strata run $dir --force) -join "`n") -replace "`r",""
+        $expected = ((Get-Content $expFile -Raw) -replace "`r","").TrimEnd("`n")
+        if ($actual.TrimEnd("`n") -ne $expected) { $ok = $false }
+        $built = ($LASTEXITCODE -eq 0)
+    } else {
+        & $strata build $dir --force | Out-Null
+        $built = ($LASTEXITCODE -eq 0)
+        if (-not $built) { $ok = $false }
+    }
+    if ($ok -and $built) {
+        $again = (& $strata build $dir) -join "`n"
+        if ($again -notlike "up to date*") { $ok = $false; Write-Host "      (second build wasn't cached: $again)" -ForegroundColor Yellow }
+    }
+    if ($ok) { Write-Host "PASS  project/$name" -ForegroundColor Green; $script:pass++ }
+    else     { Write-Host "FAIL  project/$name" -ForegroundColor Red;   $script:fail++ }
+}
+
 Write-Host ""
 Write-Host "$pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }

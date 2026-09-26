@@ -1,0 +1,2 @@
+// a module in a subfolder: imported as game.util
+export int double_it(int x) { return x * 2 }

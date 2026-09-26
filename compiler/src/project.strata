@@ -1,0 +1,251 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
+// src/project.strata - reads a project file (`strata.toml`). Part of the build system,
+// not the compiler core.
+//
+// The file is a small TOML subset: `[section]` headers, `key = value` lines, `#` comments.
+// Values are "strings", true/false, or ["string", "arrays"] (which may span lines).
+//
+//     [project]
+//     name    = "mygame"
+//     entry   = "src/main.strata"   # default; imports resolve from this file's folder
+//     output  = "exe"               # "exe" or "dll"
+//     out_dir = "build"             # default
+//
+//     [build]                       # every platform
+//     release      = false          # true: -O2, false: -O0 -g (`--release` overrides)
+//     defines      = ["GAME_DEBUG=1"]
+//     include_dirs = ["third_party/include"]
+//     lib_dirs     = ["third_party/lib"]
+//     libs         = ["raylib"]
+//     c_sources    = ["native/audio.c"]
+//
+//     [windows]                     # only on that platform; same keys as [build],
+//     libs = ["user32", "gdi32"]    # plus `frameworks` on [macos]
+//     [linux]
+//     libs = ["X11"]
+//     [macos]
+//     frameworks = ["Cocoa"]
+//
+// Unknown sections and keys are errors, so a typo can't silently do nothing.
+
+import modules   // dirname_of
+
+export struct Project {
+    bool   ok
+    string file              // path of the strata.toml
+    string root              // its folder; entry / out_dir / other paths are relative to it
+    string name
+    string version
+    string entry
+    string output            // "exe" or "dll"
+    string out_dir
+    bool   release
+    string[dynamic] defines
+    string[dynamic] include_dirs
+    string[dynamic] lib_dirs
+    string[dynamic] libs
+    string[dynamic] c_sources
+    string[dynamic] frameworks
+}
+
+// The platform stratac is running on. stratac only runs on Windows so far; this is the one
+// place to change when it runs elsewhere.
+export string host_os() { return "windows" }
+
+// ---- small string helpers --------------------------------------------------
+
+bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r' }
+
+string trim(string s) {
+    int a = 0
+    int b = s.len
+    while a < b && is_space(s[a]) { a += 1 }
+    while b > a && is_space(s[b - 1]) { b -= 1 }
+    return substr(s, a, b - a)
+}
+
+// `s` without a trailing # comment (a # inside a "string" doesn't count)
+string strip_comment(string s) {
+    bool in_str = false
+    for i in 0..s.len {
+        if s[i] == '"' && (i == 0 || s[i - 1] != '\\') { in_str = !in_str }
+        if s[i] == '#' && !in_str { return substr(s, 0, i) }
+    }
+    return s
+}
+
+// ---- parser -----------------------------------------------------------------
+
+struct Toml {
+    Project p
+    string  section
+    int     line
+    string  fname          // file name, for errors
+}
+
+void toml_error(Toml* t, string msg) {
+    t.p.ok = false
+    print(t.fname + ":" + int_to_str(t.line) + ": error: " + msg)
+}
+
+// "text" -> text (handles \" and \\); sets an error if it isn't a string
+string toml_string(Toml* t, string v) {
+    if v.len < 2 || v[0] != '"' || v[v.len - 1] != '"' {
+        toml_error(t, "expected a \"quoted string\", got " + v)
+        return ""
+    }
+    string r = ""
+    int i = 1
+    while i < v.len - 1 {
+        if v[i] == '\\' && i + 1 < v.len - 1 { r = r + substr(v, i + 1, 1); i += 2 }
+        else { r = r + substr(v, i, 1); i += 1 }
+    }
+    return r
+}
+
+bool toml_bool(Toml* t, string v) {
+    if v == "true" { return true }
+    if v != "false" { toml_error(t, "expected true or false, got " + v) }
+    return false
+}
+
+// ["a", "b", ...] -> its strings
+string[dynamic] toml_array(Toml* t, string v) {
+    string[dynamic] out = []
+    if v.len < 2 || v[0] != '[' || v[v.len - 1] != ']' {
+        toml_error(t, "expected a [\"list\", \"of strings\"], got " + v)
+        return out
+    }
+    string body = substr(v, 1, v.len - 2)
+    string item = ""
+    bool in_str = false
+    for i in 0..body.len {
+        char c = body[i]
+        if c == '"' && (i == 0 || body[i - 1] != '\\') { in_str = !in_str }
+        if c == ',' && !in_str {
+            if trim(item) != "" { out.push(toml_string(t, trim(item))) }
+            item = ""
+        } else {
+            item = item + substr(body, i, 1)
+        }
+    }
+    if trim(item) != "" { out.push(toml_string(t, trim(item))) }
+    return out
+}
+
+// A key in [build] or in a platform section. `apply` is false for another platform's
+// section: its values are still checked, but not used.
+void toml_build_key(Toml* t, string key, string v, bool platform, bool apply) {
+    if key == "release" && !platform {
+        bool r = toml_bool(t, v)
+        if apply { t.p.release = r }
+        return
+    }
+    bool list_key = key == "defines" || key == "include_dirs" || key == "lib_dirs" || key == "libs" || key == "c_sources"
+    if key == "frameworks" && t.section == "macos" { list_key = true }
+    if !list_key {
+        toml_error(t, "unknown key '" + key + "' in [" + t.section + "]")
+        return
+    }
+    string[dynamic] items = toml_array(t, v)
+    if !apply { return }
+    for i in 0..items.len {
+        if key == "defines"           { t.p.defines.push(items[i]) }
+        else if key == "include_dirs" { t.p.include_dirs.push(items[i]) }
+        else if key == "lib_dirs"     { t.p.lib_dirs.push(items[i]) }
+        else if key == "libs"         { t.p.libs.push(items[i]) }
+        else if key == "c_sources"    { t.p.c_sources.push(items[i]) }
+        else                          { t.p.frameworks.push(items[i]) }
+    }
+}
+
+void toml_key(Toml* t, string key, string v) {
+    string sec = t.section
+    if sec == "project" {
+        if key == "name"         { t.p.name = toml_string(t, v) }
+        else if key == "version" { t.p.version = toml_string(t, v) }
+        else if key == "entry"   { t.p.entry = toml_string(t, v) }
+        else if key == "out_dir" { t.p.out_dir = toml_string(t, v) }
+        else if key == "output" {
+            t.p.output = toml_string(t, v)
+            if t.p.output != "exe" && t.p.output != "dll" { toml_error(t, "output must be \"exe\" or \"dll\"") }
+        }
+        else { toml_error(t, "unknown key '" + key + "' in [project]") }
+    } else if sec == "build" {
+        toml_build_key(t, key, v, false, true)
+    } else if sec == "windows" || sec == "linux" || sec == "macos" {
+        toml_build_key(t, key, v, true, sec == host_os())
+    } else if sec == "" {
+        toml_error(t, "'" + key + "' must be inside a section such as [project]")
+    }
+}
+
+// Load and validate a strata.toml. Errors are printed; `ok` is false if there were any.
+export Project load_project(string path) {
+    string[dynamic] d = []
+    string[dynamic] i = []
+    string[dynamic] ld = []
+    string[dynamic] l = []
+    string[dynamic] cs = []
+    string[dynamic] fw = []
+    Project p = Project{ true, path, dirname_of(path), "", "", "src/main.strata", "exe", "build", false, d, i, ld, l, cs, fw }
+    Toml t = Toml{ p, "", 0, basename_of(path) }
+
+    string src = read_file(path)
+    if src.len == 0 {
+        print(basename_of(path) + ": error: cannot read the project file (" + path + ")")
+        t.p.ok = false
+        return t.p
+    }
+
+    // split into lines (so errors can name them), then parse
+    string[dynamic] lines = []
+    string cur = ""
+    for k in 0..src.len {
+        if src[k] == '\n' { lines.push(cur); cur = "" } else { cur = cur + substr(src, k, 1) }
+    }
+    lines.push(cur)
+
+    int n = 0
+    while n < lines.len {
+        t.line = n + 1
+        string ln = trim(strip_comment(lines[n]))
+        n += 1
+        if ln == "" {
+            // blank or comment-only line
+        } else if ln[0] == '[' {
+            if ln[ln.len - 1] != ']' { toml_error(&t, "a section header needs a closing ']'") }
+            else {
+                t.section = trim(substr(ln, 1, ln.len - 2))
+                string s = t.section
+                if s != "project" && s != "build" && s != "windows" && s != "linux" && s != "macos" {
+                    toml_error(&t, "unknown section [" + s + "] (expected [project], [build], [windows], [linux] or [macos])")
+                }
+            }
+        } else {
+            int eq = 0 - 1
+            for k in 0..ln.len { if eq < 0 && ln[k] == '=' { eq = k } }
+            if eq < 0 { toml_error(&t, "expected 'key = value'") }
+            else {
+                string key = trim(substr(ln, 0, eq))
+                string val = trim(substr(ln, eq + 1, ln.len - eq - 1))
+                // an array may continue over several lines until its ']'
+                if val.len > 0 && val[0] == '[' {
+                    while val[val.len - 1] != ']' && n < lines.len {
+                        val = val + " " + trim(strip_comment(lines[n]))
+                        n += 1
+                    }
+                }
+                toml_key(&t, key, val)
+            }
+        }
+    }
+
+    if t.p.name == "" && t.p.ok {
+        t.line = 1
+        toml_error(&t, "[project] needs a name (name = \"...\")")
+    }
+    return t.p
+}

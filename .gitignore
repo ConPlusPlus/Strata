@@ -6,6 +6,9 @@
 compiler/src/*.c
 compiler/src/*.exe
 
+# build output of the test projects (tests/projects/*/build/)
+compiler/tests/projects/*/build/
+
 # stratac output beside example programs
 compiler/examples/*.c
 compiler/examples/*.exe
