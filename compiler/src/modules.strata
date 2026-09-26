@@ -21,6 +21,7 @@ import token
 import lexer
 import ast
 import parser
+import "strata_host.h"   // strata_report: where messages go (see strata_host.h)
 
 // ---- paths ---------------------------------------------------------------
 
@@ -61,11 +62,13 @@ string module_rel_path(string name) {
 
 export struct LoadResult { Program prog; bool ok }
 
-struct Loader { Program prog; bool had_error; string root }   // root: the project root folder
+// root: the project root folder. root_text: when has_text, the root file's source (an
+// editor's unsaved buffer) instead of what's on disk.
+struct Loader { Program prog; bool had_error; string root; bool has_text; string root_text }
 
 void ld_error(Loader* ld, string file, int line, int col, string msg) {
     ld.had_error = true
-    print(file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg)
+    strata_report(file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg)
 }
 
 int ld_find(Loader* ld, string path) {
@@ -82,10 +85,12 @@ int ld_module(Loader* ld, string path, string file, string name, bool is_root) {
     int idx = ld.prog.modules.len
     ld.prog.modules.push(new_module(name, path, file))   // registered first, so cycles terminate
 
-    Parser p = new_parser(lex(read_file(path)))
+    string src = ""
+    if is_root && ld.has_text { src = ld.root_text } else { src = read_file(path) }
+    Parser p = new_parser(lex(src))
     Program part = parse_program(&p)
     if p.had_error {
-        print(file + ":" + int_to_str(p.err_line) + ":" + int_to_str(p.err_col) + ": parse error: " + p.err_msg)
+        strata_report(file + ":" + int_to_str(p.err_line) + ":" + int_to_str(p.err_col) + ": parse error: " + p.err_msg)
         ld.had_error = true
         return idx
     }
@@ -119,11 +124,17 @@ int ld_module(Loader* ld, string path, string file, string name, bool is_root) {
 
 // Load a program rooted at `path`. Errors are printed as they are found; `ok` is false
 // if there were any (parse errors, missing modules, code in a module).
-export LoadResult load_program(string path) {
+export LoadResult load_program(string path) { return load_program_impl(path, false, "") }
+
+// The same, but the root file's source is `text` (not read from disk). Imported modules
+// still come from disk, relative to `path`'s folder.
+export LoadResult load_program_text(string path, string text) { return load_program_impl(path, true, text) }
+
+LoadResult load_program_impl(string path, bool has_text, string text) {
     Decl*[dynamic]  decls = []
     Stmt*[dynamic]  main  = []
     Module[dynamic] mods  = []
-    Loader ld = Loader{ Program{ decls, main, mods }, false, dirname_of(path) }
+    Loader ld = Loader{ Program{ decls, main, mods }, false, dirname_of(path), has_text, text }
     ld_module(&ld, path, basename_of(path), stem_of(basename_of(path)), true)
     return LoadResult{ ld.prog, !ld.had_error }
 }

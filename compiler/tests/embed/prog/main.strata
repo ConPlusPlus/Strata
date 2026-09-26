@@ -1,0 +1,3 @@
+// the program the embedding tests compile: a root file + one module
+import helper
+print(shout("hi"))

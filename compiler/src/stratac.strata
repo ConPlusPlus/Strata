@@ -14,10 +14,10 @@
 import core   // the compiler (every phase, re-exported)
 import dump   // print_tokens / print_program
 import project   // strata.toml
-import build     // the build pipeline + cache
+import build     // the build pipeline + cache, targets
+import version   // stratac_version
 import <stdlib.h>   // system()  (C header, passed through to the generated C)
 
-string stratac_version() { return "1.2.0 (projects)"; }
 
 // ---- paths -------------------------------------------------------------
 // (stem_of / basename_of / dirname_of live in the core's module loader)
@@ -78,53 +78,19 @@ int cmd_emit(string path) {
     return 0
 }
 
-// ---- targets --------------------------------------------------------------
-// What a command works on: a single .strata file, or a project (a strata.toml, a folder
-// containing one, or - with no argument - the current folder).
-
-struct Target { bool ok; bool is_project; string file; Project proj }
-
-bool ends_with(string s, string suffix) {
-    return s.len >= suffix.len && substr(s, s.len - suffix.len, suffix.len) == suffix
-}
-
-Target resolve_target(string arg) {
-    Project none = load_project_none()
-    if ends_with(arg, ".strata") || ends_with(arg, ".str") {
-        return Target{ true, false, arg, none }
-    }
-    string toml = "strata.toml"
-    if ends_with(arg, "strata.toml") { toml = arg }
-    else if arg != "" { toml = arg + "/strata.toml" }
-    if !file_exists(toml) {
-        if arg == "" { print("error: no strata.toml in this folder (pass a .strata file or a project folder, or create one with 'stratac new <name>')") }
-        else { print("error: no strata.toml in " + arg) }
-        return Target{ false, false, "", none }
-    }
-    Project p = load_project(toml)
-    return Target{ p.ok, true, p.root + "/" + p.entry, p }
-}
-
-// An empty Project for targets that aren't one.
-Project load_project_none() {
-    string[dynamic] e = []
-    return Project{ false, "", "", "", "", "", "", "", false, e, e, e, e, e, e }
-}
-
-BuildSpec target_spec(Target t, bool release, bool force, bool quiet) {
-    if t.is_project { return spec_for_project(t.proj, stratac_version(), release, force, quiet) }
-    return spec_for_file(t.file, stratac_version(), quiet)
+BuildSpec cli_spec(Target t, bool release, bool force, bool quiet) {
+    return target_spec(t, stratac_version(), release, force, quiet)
 }
 
 // ---- build / run / new --------------------------------------------------------
 
 int cmd_build(Target t, string libdir, bool release, bool force) {
-    if run_build(target_spec(t, release, force, false), libdir) { return 0 }
+    if run_build(cli_spec(t, release, force, false), libdir) { return 0 }
     return 1
 }
 
 int cmd_run(Target t, string libdir, bool release, bool force, string[dynamic] prog_args) {
-    BuildSpec spec = target_spec(t, release, force, true)
+    BuildSpec spec = cli_spec(t, release, force, true)
     if spec.dll { print("error: this project builds a dll; there's nothing to run"); return 1 }
     if !run_build(spec, libdir) { return 1 }
     string exe = win_path(spec.out_bin)

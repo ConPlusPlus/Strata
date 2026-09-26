@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
+// src/version.strata - the compiler's version (shared by the CLI and libstrata).
+
+export string stratac_version() { return "1.3.0 (embedding)" }

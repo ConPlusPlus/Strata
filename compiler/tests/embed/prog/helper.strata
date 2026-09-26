@@ -1,0 +1,1 @@
+export string shout(string s) { return s + "!" }

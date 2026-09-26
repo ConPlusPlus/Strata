@@ -89,15 +89,12 @@ Write-Host "building console.exe ..." -ForegroundColor Cyan
 if (-not $?) { throw "console.exe build failed" }
 Copy-Item (Join-Path $src "console.exe") (Join-Path $bin "console.exe") -Force
 
-# --- libstrata.dll: the compiler's C, compiled as a shared library ---------
+# --- libstrata.dll: the compiler as a library (api/strata.toml -> bin/) -----
+# Its public API is src/libstrata.strata (documented for C in api/strata.h). The build
+# also writes bin/libstrata.dll.a (import library) and bin/libstrata.h (generated header).
 Write-Host "building libstrata.dll ..." -ForegroundColor Cyan
-$cpath = Join-Path $bin "libstrata.c"
-$cLines = & $stratac emit $compilerSrc
-if (-not $?) { throw "emit failed" }
-[IO.File]::WriteAllLines($cpath, $cLines)   # UTF-8 no BOM, so gcc reads it verbatim
-$dll = Join-Path $bin "libstrata.dll"
-& gcc -std=gnu11 -shared -O2 -o $dll $cpath -I $lib -lm
-if (-not $?) { throw "gcc -shared failed" }
+& $stratac build (Join-Path $here "api") | Out-Null
+if (-not $?) { throw "libstrata.dll build failed" }
 
 Write-Host ""
 Write-Host "artifacts in compiler\bin\ :" -ForegroundColor Green

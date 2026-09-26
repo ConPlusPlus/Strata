@@ -50,6 +50,8 @@ for i in 0..60 {
   bootstrapped from a pinned release and verified to reproduce itself byte-for-byte
 - ✅ syntax highlighting for VS Code and Visual Studio ([`editors/`](editors/))
 - ✅ **projects**: `stratac new`, a `strata.toml` (per-platform libraries, C sources, exe or dll), cached builds
+- ✅ **embeddable**: `libstrata.dll` + `strata.h` (C), `strata.hpp` (C++), `Strata.cs` (C#) for engines and tools;
+  Strata-built dlls come with a generated C header
 - ⏳ next: tagged unions + pattern matching, SoA arrays, hot-reload
 
 The compiler is called **`stratac`**. It is written in Strata and compiles to plain C.
@@ -104,6 +106,10 @@ and distribute your version, and you publish your source (the "Linux approach").
 The Strata **runtime** carries a linking exception ([`LICENSE-RUNTIME.md`](LICENSE-RUNTIME.md)),
 so **programs you build with Strata are entirely yours** — license and sell them under any
 terms you like, open or closed. The GPL covers the compiler, never what you make with it.
+
+The Strata **compiler library** (`libstrata`, for engines and tools) carries an embedding
+exception ([`LICENSE-EMBEDDING.md`](LICENSE-EMBEDDING.md)): **any engine may embed Strata**,
+whatever its license.
 
 **Commercial license:** to modify the *compiler* and keep your changes private (no GPL
 disclosure), a commercial license is available from **$100** — see [`COMMERCIAL.md`](COMMERCIAL.md).

@@ -15,6 +15,7 @@
 // `var` inference writes the resolved type back onto the AST node for codegen to use.
 
 import ast
+import "strata_host.h"   // strata_report: where messages go (see strata_host.h)
 
 // ---- checker types -----------------------------------------------------
 
@@ -116,7 +117,7 @@ void ck_error(Checker* c, int line, int col, string msg) {
     c.had_error = true
     string file = c.file
     if c.cur >= 0 && c.cur < c.mods.len { file = c.mods[c.cur].file }
-    print(file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg)
+    strata_report(file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg)
 }
 
 // ---- modules + visibility ------------------------------------------------

@@ -53,6 +53,7 @@ compiler/
 ├─ ARCHITECTURE.md      ← this file
 ├─ build.ps1            bootstraps + builds all artifacts into bin/ (2 exes + libstrata.dll)
 ├─ bootstrap.txt        the release version stage0 is pinned to
+├─ api/                 libstrata's project file + the embedding API: strata.h, strata.hpp, Strata.cs
 ├─ src/
 │  │  ── the CORE (no main; the "library") ──
 │  ├─ token.strata      shared data: token kinds + Token struct
@@ -70,6 +71,7 @@ compiler/
 │  ├─ dump.strata       renders core data (tokens/AST) to text
 │  │  ── front-ends (thin; each has top-level code = its main) ──
 │  ├─ stratac.strata    front-end #1: the CLI (tokens, ast, check, emit, build, run)
+│  ├─ libstrata.strata  front-end #3: the public C API (libstrata.dll, for engines)
 │  └─ console.strata    front-end #2: the explorer console
 ├─ bin/                 build output: stratac.exe, console.exe, libstrata.dll
 ├─ build/               bootstrap compilers (cached release + stage1/2)

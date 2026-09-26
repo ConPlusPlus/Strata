@@ -25,9 +25,12 @@ $stageRoot = Join-Path $env:TEMP "strata-pkg"
 if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
 $stage = Join-Path $stageRoot "strata"
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'lib') | Out-Null
-foreach ($f in 'stratac.exe','console.exe','libstrata.dll') { Copy-Item (Join-Path $bin $f) (Join-Path $stage $f) }
+New-Item -ItemType Directory -Force -Path (Join-Path $stage 'include') | Out-Null
+foreach ($f in 'stratac.exe','console.exe','libstrata.dll','libstrata.dll.a') { Copy-Item (Join-Path $bin $f) (Join-Path $stage $f) }
 Copy-Item (Join-Path $lib '*.h') (Join-Path $stage 'lib')
-foreach ($f in 'LICENSE','LICENSE-RUNTIME.md','README.md','CHANGELOG.md') {
+# the embedding API: C header, C++ wrapper, C# bindings
+foreach ($f in 'strata.h','strata.hpp','Strata.cs') { Copy-Item (Join-Path $here "api\$f") (Join-Path $stage "include\$f") }
+foreach ($f in 'LICENSE','LICENSE-RUNTIME.md','LICENSE-EMBEDDING.md','README.md','CHANGELOG.md') {
     if (Test-Path (Join-Path $repo $f)) { Copy-Item (Join-Path $repo $f) (Join-Path $stage $f) }
 }
 

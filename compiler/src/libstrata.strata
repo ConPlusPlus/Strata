@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: GPL-3.0-only WITH the Strata embedding exception
+// Copyright © 2026 Connor Rutberg
+//
+// src/libstrata.strata - the compiler as a library: libstrata.dll's public C API.
+// Engines, editors and tools embed Strata through these functions (documented for C in
+// compiler/api/strata.h; see LICENSE-EMBEDDING.md for the licensing).
+//
+// Built as a dll by compiler/api/strata.toml. Every `export` here is an entry point of
+// the dll (a dll exports exactly its entry module's exports).
+//
+// Conventions:
+//   * Strings passed in are UTF-8, NUL-terminated. Strings returned stay valid until
+//     strata_reset() (which frees ALL compiler memory).
+//   * Messages (errors, "built ...") are captured, not printed: read them with
+//     strata_diagnostics() after each call.
+//   * Not thread-safe: use the library from one thread at a time.
+
+import core
+import build
+import version
+import "strata_host.h"
+
+export string strata_version() { return stratac_version() }
+
+// ---- check ---------------------------------------------------------------------
+
+bool check_loaded(LoadResult lr, string path) {
+    if !lr.ok { return false }
+    Checker* ck = new_checker(basename_of(path))
+    ck_check(ck, lr.prog)
+    return !ck.had_error
+}
+
+// Type-check the program rooted at `path` (the file and the modules it imports).
+export bool strata_check(string path) {
+    strata_capture_begin()
+    bool ok = check_loaded(load_program(path), path)
+    strata_capture_end()
+    return ok
+}
+
+// The same, with the root file's text given (e.g. an editor's unsaved buffer); imported
+// modules are still read from disk, relative to `path`'s folder.
+export bool strata_check_source(string path, string source) {
+    strata_capture_begin()
+    bool ok = check_loaded(load_program_text(path, source), path)
+    strata_capture_end()
+    return ok
+}
+
+// ---- emit ------------------------------------------------------------------------
+
+string emit_loaded(LoadResult lr, string path) {
+    if !check_loaded(lr, path) { return "" }
+    Codegen cg = new_codegen()
+    string c = generate(&cg, lr.prog)
+    if cg.had_error { strata_report("codegen: program uses features not supported yet"); return "" }
+    return c
+}
+
+// Compile the program rooted at `path` to C source. Returns "" on errors.
+export string strata_emit(string path) {
+    strata_capture_begin()
+    string c = emit_loaded(load_program(path), path)
+    strata_capture_end()
+    return c
+}
+
+export string strata_emit_source(string path, string source) {
+    strata_capture_begin()
+    string c = emit_loaded(load_program_text(path, source), path)
+    strata_capture_end()
+    return c
+}
+
+// ---- build -------------------------------------------------------------------------
+
+// Build a target into an exe or dll with the C compiler (gcc): a .strata file, a project
+// folder, or a strata.toml. Project builds are cached. Returns success.
+export bool strata_build(string target, bool release, bool force) {
+    strata_capture_begin()
+    Target t = resolve_target(target)
+    bool ok = t.ok && run_build(target_spec(t, stratac_version(), release, force, false), strata_host_libdir())
+    strata_capture_end()
+    return ok
+}
+
+// Where strata_build(target) puts its exe / dll ("" if the target isn't valid).
+export string strata_output_path(string target) {
+    strata_capture_begin()
+    Target t = resolve_target(target)
+    string out = ""
+    if t.ok { out = target_spec(t, stratac_version(), false, false, true).out_bin }
+    strata_capture_end()
+    return out
+}
+
+// ---- the rest ------------------------------------------------------------------------
+
+// Messages from the most recent call, one per line ("" if none).
+export string strata_diagnostics() { return strata_capture_text() }
+
+// The folder holding Strata's runtime headers (lib/). Default: the lib/ folder next to
+// libstrata.dll, which is where the installer puts it.
+export void strata_set_libdir(string dir) { strata_host_set_libdir(dir) }
+
+// Free all memory the compiler has allocated. Every string it returned becomes invalid.
+export void strata_reset() { strata_host_reset() }

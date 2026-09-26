@@ -74,6 +74,44 @@ Get-ChildItem -Path (Join-Path $here "projects") -Directory | ForEach-Object {
     else     { Write-Host "FAIL  project/$name" -ForegroundColor Red;   $script:fail++ }
 }
 
+# --- embedding: host programs using libstrata and a Strata-built dll ---------------
+# tests/embed/ holds small "engines": C (the C API), C++ (strata.hpp), C# (Strata.cs, if a
+# .NET SDK is installed), and a C program calling tests/projects/lib's dll through its
+# generated header. Each one's output must match its expected_*.txt.
+$embed   = Join-Path $here "embed"
+$binDir  = Join-Path $compiler "bin"
+$apiDir  = Join-Path $compiler "api"
+$libProj = Join-Path $here "projects\lib\build"
+$eb      = Join-Path $embed "build"
+if (-not (Test-Path $eb)) { New-Item -ItemType Directory -Path $eb | Out-Null }
+$savedPath = $env:Path
+$env:Path = "$binDir;$libProj;$env:Path"      # so the hosts find libstrata.dll / mathlib.dll
+Push-Location $embed
+function Test-Host([string]$name, [scriptblock]$compile, [string]$exe, [string]$expected) {
+    & $compile 2>&1 | Out-Null
+    $ok = $?
+    if ($ok) {
+        $out  = ((& $exe) -join "`n") -replace "`r",""
+        $want = ((Get-Content (Join-Path $embed $expected) -Raw) -replace "`r","").TrimEnd("`n")
+        $ok = ($out.TrimEnd("`n") -eq $want)
+    }
+    if ($ok) { Write-Host "PASS  embed/$name" -ForegroundColor Green; $script:pass++ }
+    else     { Write-Host "FAIL  embed/$name" -ForegroundColor Red;   $script:fail++ }
+}
+try {
+    Test-Host "c-api" { gcc -std=c99 -Wall host_api.c -I $apiDir -L $binDir -lstrata -lpsapi -o build/host_api.exe } "build/host_api.exe" "expected_api.txt"
+    Test-Host "strata-dll" { gcc -std=c99 -Wall host_dll.c -I $libProj -L $libProj -lmathlib -o build/host_dll.exe } "build/host_dll.exe" "expected_dll.txt"
+    Test-Host "cpp" { g++ -std=c++17 -Wall host_cpp.cpp -I $apiDir -L $binDir -lstrata -o build/host_cpp.exe } "build/host_cpp.exe" "expected_cpp.txt"
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+        Test-Host "csharp" { dotnet build csharp -c Release -o build/cs --nologo -v q } "build/cs/Embed.exe" "expected_cs.txt"
+    } else {
+        Write-Host "SKIP  embed/csharp (no .NET SDK)" -ForegroundColor Yellow
+    }
+} finally {
+    Pop-Location
+    $env:Path = $savedPath
+}
+
 Write-Host ""
 Write-Host "$pass passed, $fail failed"
 if ($fail -gt 0) { exit 1 }

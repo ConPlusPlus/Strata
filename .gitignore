@@ -8,6 +8,11 @@ compiler/src/*.exe
 
 # build output of the test projects (tests/projects/*/build/)
 compiler/tests/projects/*/build/
+# embedding tests: host builds, the .NET project's output, the compiled test program
+compiler/tests/embed/build/
+compiler/tests/embed/csharp/bin/
+compiler/tests/embed/csharp/obj/
+compiler/tests/embed/prog/*.c
 
 # stratac output beside example programs
 compiler/examples/*.c

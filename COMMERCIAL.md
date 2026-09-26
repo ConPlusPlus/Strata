@@ -4,6 +4,8 @@ Strata's compiler is free software under **GPL-3.0**. Most people never need any
 
 - **Games and programs you build with Strata are always yours** — open or closed, sell them
   however you like. The GPL never reaches them (see [`LICENSE-RUNTIME.md`](LICENSE-RUNTIME.md)).
+- **Engines and tools may embed the compiler** (`libstrata`) under any license
+  (see [`LICENSE-EMBEDDING.md`](LICENSE-EMBEDDING.md)).
 - If you **distribute a modified version of the Strata compiler**, the GPL simply asks you to
   publish *that* source. For most contributors and hobbyists, that's fine.
 

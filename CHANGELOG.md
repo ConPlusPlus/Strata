@@ -7,6 +7,34 @@ and a GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [1.3.0] - 2026-09-26
+### Added
+- **The compiler as a library, for engines.** `libstrata.dll` exports a public C API
+  (`compiler/api/strata.h`):
+  - `strata_check` / `strata_check_source` (in-memory source, e.g. an editor buffer)
+  - `strata_emit` / `strata_emit_source` (to C)
+  - `strata_build` / `strata_output_path` (exe or dll, via gcc, cached for projects)
+  - `strata_diagnostics` (messages are captured, not printed)
+  - `strata_set_libdir` (the runtime lib/ folder is found next to the dll by default)
+  - `strata_reset` (frees all compiler memory, so an engine can recompile indefinitely)
+
+  The API is written in Strata (`src/libstrata.strata`) and built by
+  `compiler/api/strata.toml`. Wrappers: `strata.hpp` (C++) and `Strata.cs` (C#,
+  P/Invoke: Unity, Godot C#, ...).
+- **Strata dlls are proper libraries:** a dll exports exactly its entry module's
+  `export`ed functions, and the build writes a generated C header (`<name>.h`) and an
+  import library (`<name>.dll.a`) next to it.
+- **Embedding license:** `LICENSE-EMBEDDING.md` (the GNU Classpath exception applied to
+  Strata) lets any engine embed libstrata, whatever its license.
+- The install and release zip add `include/` (strata.h, strata.hpp, Strata.cs) and
+  `libstrata.dll.a`.
+- Tests (50): host programs that embed the compiler from C, C++ and C#, and a C
+  program calling a Strata-built dll through its generated header. One test runs 300
+  compile + reset cycles and checks that memory stays flat.
+### Changed
+- Compiler messages go through one sink (`src/strata_host.h`): printed by the CLI,
+  captured by the library. Dynamic arrays can now all be freed at once (hosts only).
+
 ## [1.2.0] - 2026-09-26
 ### Added
 - **Build system: projects.** A `strata.toml` project file (a small TOML subset) sets

@@ -31,6 +31,7 @@
 // Unknown sections and keys are errors, so a typo can't silently do nothing.
 
 import modules   // dirname_of
+import "strata_host.h"   // strata_report: where messages go (see strata_host.h)
 
 export struct Project {
     bool   ok
@@ -87,7 +88,7 @@ struct Toml {
 
 void toml_error(Toml* t, string msg) {
     t.p.ok = false
-    print(t.fname + ":" + int_to_str(t.line) + ": error: " + msg)
+    strata_report(t.fname + ":" + int_to_str(t.line) + ": error: " + msg)
 }
 
 // "text" -> text (handles \" and \\); sets an error if it isn't a string
@@ -195,7 +196,7 @@ export Project load_project(string path) {
 
     string src = read_file(path)
     if src.len == 0 {
-        print(basename_of(path) + ": error: cannot read the project file (" + path + ")")
+        strata_report(basename_of(path) + ": error: cannot read the project file (" + path + ")")
         t.p.ok = false
         return t.p
     }

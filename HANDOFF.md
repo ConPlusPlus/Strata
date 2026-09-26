@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 1.2.0** · tests: **46/46** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 1.3.0** · tests: **50/50** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -37,7 +37,7 @@ version is retired to `archive/dminusminus-seed/`.
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.2.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.3.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -99,6 +99,12 @@ A *target* is a `.strata` file, a project folder, a `strata.toml`, or nothing (t
 the current folder). `stratac` finds its runtime `lib/` next to the executable (it passes
 `-I <lib>` to gcc).
 
+**Embedding** (engines, editors, tools): link `libstrata.dll` and include `strata.h`
+(C), `strata.hpp` (C++) or `Strata.cs` (C#), all in `compiler/api/` and installed to
+`<prefix>/include/`. The API: check, emit C, build, read diagnostics, reset memory. A
+Strata project with `output = "dll"` is a library a host can call; its build writes
+`<name>.h` and `<name>.dll.a` next to the dll.
+
 **Projects (`strata.toml`)**: see the comment at the top of `src/project.strata` for every
 key. The main ones:
 - `[project]`: `name`, `entry`, `output = "exe" | "dll"`, `out_dir`
@@ -143,6 +149,9 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 | `dump.strata` | renders tokens/AST to text (front-end utility) |
 | `project.strata` | build system: reads `strata.toml` (a TOML subset) into a `Project` |
 | `build.strata` | build system: the pipeline (load → check → C → gcc/link), dll output, the cache |
+| `libstrata.strata` | the public embedding API (`strata_*`), built as `libstrata.dll` by `compiler/api/strata.toml` |
+| `version.strata` | the version string (shared by the CLI and the library) |
+| `strata_host.h` | C helpers the compiler imports: the message sink (print vs capture), memory reset, finding lib/ |
 | `stratac.strata` | front-end #1: the CLI (targets, flags, `new`) |
 | `console.strata` | front-end #2: a tokens+AST explorer (proves the core is reusable) |
 
@@ -224,7 +233,7 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
 
 ## 6. Tests
 
-`run.ps1` runs **46 checks**:
+`run.ps1` runs **50 checks**:
 1. **bootstrap**: runs `build.ps1` (pinned release → stage1 → stage2 + the fixpoint check).
 2. **goldens**: `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
    against `bin/stratac.exe <stage> examples/<name>.strata`, using the self-hosted
@@ -234,6 +243,10 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
 3. **projects**: each folder in `compiler/tests/projects/` is a real project. It's run
    (or, for a dll, built) with `--force` and compared to its `expected.txt`, and a second
    build must be cached ("up to date").
+4. **embedding** (`compiler/tests/embed/`): host programs that embed the compiler from C
+   (every API function, plus a flat-memory check over 300 compile + reset cycles), C++
+   (`strata.hpp`) and C# (`Strata.cs`; skipped without a .NET SDK), and a C program
+   calling a Strata-built dll through its generated header.
 
 ---
 
@@ -292,9 +305,10 @@ performance if the compiler starts building very large strings.
 
 ## 10. Roadmap
 
-**Agreed order (2026-09-26):** build system (1.2.0, done) → **public endpoints** (a real
-embedding C API + generated headers, shipped with the compiler, for engines) →
-**compiler speed + memory**.
+**Agreed order (2026-09-26):** build system (1.2.0, done) → public endpoints (1.3.0, done:
+`libstrata` C API, C++/C# wrappers, generated dll headers) → **compiler speed + memory**
+(next). Later: integrations for commercial engines (Unity, Unreal: e.g. MSVC `.lib`
+import libraries, engine plugins). Any engine may embed Strata (`LICENSE-EMBEDDING.md`).
 
 Known performance problems, for the optimization pass (measured on 12k–81k-line projects):
 - `s.len` is `strlen` (O(n)), so `for i in 0..s.len` re-scans the string on **every
@@ -330,7 +344,8 @@ Known performance problems, for the optimization pass (measured on 12k–81k-lin
   (in `src/stratac.strata`) is bumped in the same commit as the tag. Build each
   release zip from a worktree of its tag so the binaries match the version.
 - **License:** GPL-3.0 on the compiler; runtime linking exception on `lib/` (games built
-  with Strata are yours); a commercial license ($100, may go dynamic) lifts copyleft for
+  with Strata are yours); embedding exception on `libstrata` + `compiler/api/` (any engine
+  may embed it, `LICENSE-EMBEDDING.md`); a commercial license ($100, may go dynamic) lifts copyleft for
   private compiler forks (enabled by the CLA). "Strata™" is a common-law trademark (no ®).
 - **Detection:** `.gitattributes` maps `.strata` (and the archived `.dmm`/`.hmm`) to C for GitHub highlighting.
 
