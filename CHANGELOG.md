@@ -7,6 +7,45 @@ and a GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [1.5.0] - 2026-09-26
+### Added
+- **`break` and `continue`** in `while`, `for x in a..b` and `for x in array` loops.
+  `break` inside a `switch` leaves the loop (Strata's switch has no fall-through), and
+  leaving a `region` early frees it. Outside a loop they are an error.
+- **Incremental, parallel project builds.** A project is compiled as several C files:
+  a shared header with the types, and modules grouped into chunks (about two per
+  core). Each C file declares only the exports of the modules it imports. So editing a
+  function body recompiles one chunk, and changing an export recompiles only the
+  modules that import it. gcc runs in parallel, started directly (no `cmd.exe`).
+  `split = false` in `[build]` opts out.
+
+  81k-line project: full debug build 16.8 -> 4.1 s, release 27.8 -> 4.9 s, rebuild
+  after editing one function 12.9 -> 1.0 s.
+- **A nesting limit:** code nested more than 1,000 levels deep (parentheses, calls,
+  blocks, unary operators) is a clear parse error instead of a stack overflow, which
+  also keeps engines that embed the compiler safe on a 1 MB thread stack.
+- Tests (58): a multi-module split project, an incremental-rebuild check, a
+  break/continue example with its error cases, and limit checks (1,001-deep nesting
+  is an error; a 100,000-term expression compiles in well under 3 s).
+### Fixed
+- **`return` inside a `region` leaked the region.** It now evaluates its value, frees
+  every open region, then returns.
+- **Four more quadratic code-generation paths, which crashed on big inputs:**
+  - a 1 MB string literal took 21 GB and crashed; it now takes 0.05 s and 12 MB
+  - a 100,000-item array literal took 24 GB and crashed; a 1,000,000-item one now
+    takes 1.4 s
+  - a function with 10,000 parameters took 7 GB; it now takes 11 MB
+  - code nested 5,000 blocks deep took 22 GB
+- **Long operator chains** (`a + b + c + ...`) no longer recurse or re-copy: 8,000
+  terms went from 1.2 GB to 4 MB, and a 1,000,000-term expression compiles in 0.8 s.
+- Runtime state (arenas, remembered string lengths, `args()`) is shared correctly
+  across a split program's C files (`lib/sstate.h`). Single-header C libraries like
+  `crossplatform.h` are implemented once, in the main module's file.
+### Performance
+- Memory (81k-line project): check 109 -> 92 MB, emit 152 -> 135 MB. Primitive
+  types are shared, identifiers are interned per file, and the AST node structs are
+  packed.
+
 ## [1.4.0] - 2026-09-26
 ### Performance
 The compiler is **25–540× faster** and uses **up to 40% less memory** than 1.3.0

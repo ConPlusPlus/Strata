@@ -31,9 +31,10 @@ export struct Parser {
     int     err_line
     int     err_col
     string     err_msg
+    int     depth      // how deeply the code being parsed is nested (see max_nesting)
 }
 
-export Parser new_parser(Token[dynamic] toks) { return Parser{ toks, 0, false, false, 0, 0, "" }; }
+export Parser new_parser(Token[dynamic] toks) { return Parser{ toks, 0, false, false, 0, 0, "", 0 }; }
 
 // ---- cursor ------------------------------------------------------------
 
@@ -278,6 +279,7 @@ export Program parse_program(Parser* p) {
 Stmt* block(Parser* p) {
     Token lb = p_expect(p, TkLBrace)
     Stmt* b = new_stmt(StBlock, lb.line, lb.col)
+    if !nest_enter(p) { return b }
     skip_newlines(p)
     while (!p_check(p, TkRBrace) && !p_at_end(p)) {
         int before = p.pos
@@ -286,6 +288,7 @@ Stmt* block(Parser* p) {
         skip_newlines(p)
     }
     p_expect(p, TkRBrace)
+    p.depth -= 1
     return b
 }
 
@@ -443,7 +446,28 @@ Expr* make_binary(string op, Expr* lhs, Expr* rhs) {
 }
 
 // loosest: range `..`, then the C-style ladder
-Expr* expression(Parser* p) { return range_expr(p); }
+// Code nested more deeply than this (parentheses, calls, operators, blocks) is an error:
+// the parser, checker and code generator recurse per level, and much deeper code would
+// overflow the stack - of stratac, or of an engine that embeds the compiler.
+int max_nesting() { return 1000 }
+
+// Enter one nesting level; false (and a parse error) if that's too deep.
+bool nest_enter(Parser* p) {
+    p.depth += 1
+    if p.depth > max_nesting() {
+        p_error(p, p_peek(p), "code is nested too deeply (more than " + int_to_str(max_nesting()) + " levels)")
+        p.depth -= 1
+        return false
+    }
+    return true
+}
+
+Expr* expression(Parser* p) {
+    if !nest_enter(p) { Token t = p_peek(p); p_advance(p); return new_expr(ExName, t.line, t.col) }
+    Expr* e = range_expr(p)
+    p.depth -= 1
+    return e
+}
 
 Expr* range_expr(Parser* p) {
     Expr* e = or_expr(p)
@@ -521,7 +545,9 @@ Expr* unary(Parser* p) {
         Token op = p_advance(p)
         Expr* u = new_expr(ExUnary, op.line, op.col)
         u.text = op.text
+        if !nest_enter(p) { return u }
         u.a = unary(p)
+        p.depth -= 1
         return u
     }
     return postfix(p)

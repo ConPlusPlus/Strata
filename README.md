@@ -50,6 +50,7 @@ for i in 0..60 {
   bootstrapped from a pinned release and verified to reproduce itself byte-for-byte
 - ✅ syntax highlighting for VS Code and Visual Studio ([`editors/`](editors/))
 - ✅ **projects**: `stratac new`, a `strata.toml` (per-platform libraries, C sources, exe or dll), cached builds
+- ✅ `break` / `continue`, and incremental, parallel project builds (edit one function: ~1 s on an 81k-line project)
 - ✅ **embeddable**: `libstrata.dll` + `strata.h` (C), `strata.hpp` (C++), `Strata.cs` (C#) for engines and tools;
   Strata-built dlls come with a generated C header
 - ⏳ next: tagged unions + pattern matching, SoA arrays, hot-reload

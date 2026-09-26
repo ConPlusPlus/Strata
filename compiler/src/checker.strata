@@ -434,6 +434,76 @@ Type* ck_expr_as(Checker* c, Expr* e, Type* target) {
     return t
 }
 
+// The type of binary expression `e`, given its operand types.
+Type* ck_binary(Checker* c, Expr* e, Type* lt, Type* rt) {
+    string op = e.text
+    if (lt.cat == TcMat || rt.cat == TcMat || lt.cat == TcQuat || rt.cat == TcQuat) {
+        if (op == "*") {
+            if (lt.cat == TcMat && rt.cat == TcMat) { return lt; }                               // mat4 * mat4
+            if (lt.cat == TcMat && rt.cat == TcVec && rt.name == "vec4") { return rt; }           // mat4 * vec4 -> vec4
+            if (lt.cat == TcQuat && rt.cat == TcQuat) { return lt; }                              // quat * quat
+            ck_error(c, e.line, e.col, "'*' is not defined between " + t_str(lt) + " and " + t_str(rt))
+            return c.t_unknown
+        }
+        ck_error(c, e.line, e.col, "only '*' is defined for matrices/quaternions")
+        return c.t_unknown
+    }
+    if (lt.cat == TcVec || rt.cat == TcVec) {
+        if (op == "+" || op == "-") {
+            if (lt.cat == TcVec && rt.cat == TcVec && lt.name == rt.name) { return lt; }
+            ck_error(c, e.line, e.col, "'" + op + "' requires two vectors of the same size, got " + t_str(lt) + " and " + t_str(rt))
+            return c.t_unknown
+        }
+        if (op == "*") {
+            if (lt.cat == TcVec && rt.cat == TcVec && lt.name == rt.name) { return lt; }
+            if (lt.cat == TcVec && t_is_numeric(rt)) { return lt; }
+            if (rt.cat == TcVec && t_is_numeric(lt)) { return rt; }
+            ck_error(c, e.line, e.col, "'*' on a vector needs a matching vector or a scalar, got " + t_str(lt) + " and " + t_str(rt))
+            return c.t_unknown
+        }
+        ck_error(c, e.line, e.col, "'" + op + "' is not defined for vectors")
+        return c.t_unknown
+    }
+    if (op == "&&" || op == "||") {
+        if ((lt.cat != TcBool && !t_is_unknown(lt)) || (rt.cat != TcBool && !t_is_unknown(rt))) {
+            ck_error(c, e.line, e.col, "'" + op + "' requires bool operands")
+        }
+        return c.t_bool
+    }
+    if (op == "==" || op == "!=") {
+        if (!t_is_unknown(lt) && !t_is_unknown(rt) && lt.cat != rt.cat && !(t_ordered(lt) && t_ordered(rt))) {
+            ck_error(c, e.line, e.col, "cannot compare " + t_str(lt) + " and " + t_str(rt))
+        }
+        return c.t_bool
+    }
+    if (op == "<" || op == "<=" || op == ">" || op == ">=") {
+        if ((!t_ordered(lt) && !t_is_unknown(lt)) || (!t_ordered(rt) && !t_is_unknown(rt))) {
+            ck_error(c, e.line, e.col, "'" + op + "' requires numeric operands")
+        }
+        return c.t_bool
+    }
+    if (op == "+" && (lt.cat == TcStr || rt.cat == TcStr)) {
+        if (!t_is_unknown(lt) && !t_is_unknown(rt) && !(lt.cat == TcStr && rt.cat == TcStr)) {
+            ck_error(c, e.line, e.col, "cannot concatenate " + t_str(lt) + " and " + t_str(rt))
+        }
+        return c.t_str_
+    }
+    if (op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>") {
+        if ((!t_is_integer(lt) && lt.cat != TcChar && !t_is_unknown(lt))
+            || (!t_is_integer(rt) && rt.cat != TcChar && !t_is_unknown(rt))) {
+            ck_error(c, e.line, e.col, "'" + op + "' requires integer operands, got " + t_str(lt) + " and " + t_str(rt))
+        }
+        return c.t_int
+    }
+    if ((!t_ordered(lt) && !t_is_unknown(lt)) || (!t_ordered(rt) && !t_is_unknown(rt))) {
+        ck_error(c, e.line, e.col, "'" + op + "' requires numeric operands, got " + t_str(lt) + " and " + t_str(rt))
+        return c.t_unknown
+    }
+    if (op == "%" && (lt.cat == TcFloat || rt.cat == TcFloat)) { ck_error(c, e.line, e.col, "'%' requires integer operands"); }
+    if (lt.cat == TcFloat || rt.cat == TcFloat) { return c.t_float; }
+    return c.t_int
+}
+
 Type* ck_expr_i(Checker* c, Expr* e) {
     switch (e.kind) {
         case ExIntLit:    return c.t_int
@@ -488,79 +558,30 @@ Type* ck_expr_i(Checker* c, Expr* e) {
 
         case ExBinary:
             {
-                string op = e.text
-                if (op == "..") {
+                if (e.text == "..") {
                     ck_error(c, e.line, e.col, "range '..' is only valid as a for-in loop range")
                     ck_expr(c, e.a); ck_expr(c, e.b)
                     return c.t_unknown
                 }
-                Type* lt = ck_expr(c, e.a)
-                Type* rt = ck_expr(c, e.b)
-                if (lt.cat == TcMat || rt.cat == TcMat || lt.cat == TcQuat || rt.cat == TcQuat) {
-                    if (op == "*") {
-                        if (lt.cat == TcMat && rt.cat == TcMat) { return lt; }                               // mat4 * mat4
-                        if (lt.cat == TcMat && rt.cat == TcVec && rt.name == "vec4") { return rt; }           // mat4 * vec4 -> vec4
-                        if (lt.cat == TcQuat && rt.cat == TcQuat) { return lt; }                              // quat * quat
-                        ck_error(c, e.line, e.col, "'*' is not defined between " + t_str(lt) + " and " + t_str(rt))
-                        return c.t_unknown
-                    }
-                    ck_error(c, e.line, e.col, "only '*' is defined for matrices/quaternions")
-                    return c.t_unknown
+                // A chain like a + b + c + ... nests down its LEFT side, so walk that side in
+                // a loop: recursing would overflow the stack on a long chain.
+                Expr*[dynamic] spine = []
+                Expr* x = e
+                while x.kind == ExBinary && x.text != ".." {
+                    spine.push(x)
+                    x = x.a
                 }
-                if (lt.cat == TcVec || rt.cat == TcVec) {
-                    if (op == "+" || op == "-") {
-                        if (lt.cat == TcVec && rt.cat == TcVec && lt.name == rt.name) { return lt; }
-                        ck_error(c, e.line, e.col, "'" + op + "' requires two vectors of the same size, got " + t_str(lt) + " and " + t_str(rt))
-                        return c.t_unknown
-                    }
-                    if (op == "*") {
-                        if (lt.cat == TcVec && rt.cat == TcVec && lt.name == rt.name) { return lt; }
-                        if (lt.cat == TcVec && t_is_numeric(rt)) { return lt; }
-                        if (rt.cat == TcVec && t_is_numeric(lt)) { return rt; }
-                        ck_error(c, e.line, e.col, "'*' on a vector needs a matching vector or a scalar, got " + t_str(lt) + " and " + t_str(rt))
-                        return c.t_unknown
-                    }
-                    ck_error(c, e.line, e.col, "'" + op + "' is not defined for vectors")
-                    return c.t_unknown
+                Type* lt = ck_expr(c, x)
+                int k = spine.len - 1
+                while k >= 0 {
+                    Expr* node = spine[k]
+                    Type* rt = ck_expr(c, node.b)
+                    Type* t = ck_binary(c, node, lt, rt)
+                    if k > 0 { node.rtype = ck_node(c, t) }   // (ck_expr records the outermost's)
+                    lt = t
+                    k -= 1
                 }
-                if (op == "&&" || op == "||") {
-                    if ((lt.cat != TcBool && !t_is_unknown(lt)) || (rt.cat != TcBool && !t_is_unknown(rt))) {
-                        ck_error(c, e.line, e.col, "'" + op + "' requires bool operands")
-                    }
-                    return c.t_bool
-                }
-                if (op == "==" || op == "!=") {
-                    if (!t_is_unknown(lt) && !t_is_unknown(rt) && lt.cat != rt.cat && !(t_ordered(lt) && t_ordered(rt))) {
-                        ck_error(c, e.line, e.col, "cannot compare " + t_str(lt) + " and " + t_str(rt))
-                    }
-                    return c.t_bool
-                }
-                if (op == "<" || op == "<=" || op == ">" || op == ">=") {
-                    if ((!t_ordered(lt) && !t_is_unknown(lt)) || (!t_ordered(rt) && !t_is_unknown(rt))) {
-                        ck_error(c, e.line, e.col, "'" + op + "' requires numeric operands")
-                    }
-                    return c.t_bool
-                }
-                if (op == "+" && (lt.cat == TcStr || rt.cat == TcStr)) {
-                    if (!t_is_unknown(lt) && !t_is_unknown(rt) && !(lt.cat == TcStr && rt.cat == TcStr)) {
-                        ck_error(c, e.line, e.col, "cannot concatenate " + t_str(lt) + " and " + t_str(rt))
-                    }
-                    return c.t_str_
-                }
-                if (op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>") {
-                    if ((!t_is_integer(lt) && lt.cat != TcChar && !t_is_unknown(lt))
-                        || (!t_is_integer(rt) && rt.cat != TcChar && !t_is_unknown(rt))) {
-                        ck_error(c, e.line, e.col, "'" + op + "' requires integer operands, got " + t_str(lt) + " and " + t_str(rt))
-                    }
-                    return c.t_int
-                }
-                if ((!t_ordered(lt) && !t_is_unknown(lt)) || (!t_ordered(rt) && !t_is_unknown(rt))) {
-                    ck_error(c, e.line, e.col, "'" + op + "' requires numeric operands, got " + t_str(lt) + " and " + t_str(rt))
-                    return c.t_unknown
-                }
-                if (op == "%" && (lt.cat == TcFloat || rt.cat == TcFloat)) { ck_error(c, e.line, e.col, "'%' requires integer operands"); }
-                if (lt.cat == TcFloat || rt.cat == TcFloat) { return c.t_float; }
-                return c.t_int
+                return lt
             }
 
         case ExCall: return ck_call(c, e)

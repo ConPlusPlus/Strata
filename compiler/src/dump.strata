@@ -52,6 +52,9 @@ string ast_type_str(TypeNode* t) {
 
 void pr_expr(int ind, Expr* e) {
     if (e == null) { pr(ind, "<null>"); return; }
+    // a very long operator chain nests this deep (the parser allows any length): stop
+    // printing there instead of recursing (and indenting) without bound
+    if ind > 400 { pr(ind, "... (nested more than 400 levels deep)"); return }
     switch (e.kind) {
         case ExIntLit:    pr(ind, "Int " + e.text)
         case ExFloatLit:  pr(ind, "Float " + e.text)

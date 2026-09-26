@@ -61,6 +61,7 @@ compiler/
 │  ├─ lexer.strata      text → tokens
 │  ├─ parser.strata     tokens → AST
 │  ├─ modules.strata    the module loader: files → one Program + module table
+│  ├─ hashidx.strata    a small hash index (the checker's name tables, the lexer's interning)
 │  ├─ checker.strata    AST → validated/inferred AST (incl. module visibility)
 │  ├─ codegen.strata    typed AST → C
 │  ├─ core.strata       umbrella module (`export import`s every phase), main-free

@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 1.4.0** · tests: **51/51** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 1.5.0** · tests: **58/58** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -37,7 +37,7 @@ version is retired to `archive/dminusminus-seed/`.
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.4.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.5.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -111,7 +111,14 @@ key. The main ones:
 - `[build]`: `defines`, `include_dirs`, `lib_dirs`, `libs`, `c_sources`, `release`
 - `[windows]` / `[linux]` / `[macos]`: per-platform `libs` (etc.)
 
-Project builds are **cached** (`build/.strata-cache`): unchanged builds skip gcc.
+Project builds are **incremental and parallel**. The program is split into C files: a
+shared header with the types, and chunks of modules, about two per core. Each file
+declares only the exports of the modules it imports, and each has its own cache key. So
+editing a function body recompiles one chunk, and changing an export recompiles only its
+importers. gcc runs in parallel, started directly with response files (no `cmd.exe`).
+`[build] split = false` gives one C file instead (libstrata uses this, because
+`strata_host.h` keeps process state in `static`s). In split builds, the runtime's state
+lives once in the main module's file (`lib/sstate.h`: `STRATA_SPLIT` / `STRATA_MAIN_TU`).
 
 **Test** (rebuilds `stratac`, runs every golden byte-for-byte):
 ```
@@ -190,7 +197,8 @@ vec3 v = vec3(1, 0, 0)    // explicit
 const PI2 = 6.283
 ```
 
-**Control flow:** `if`/`else`, `while`, `for x in 0..n`, `for x in array`, and
+**Control flow:** `if`/`else`, `while`, `for x in 0..n`, `for x in array`, `break` / `continue`
+(a `break` inside a `switch` leaves the loop; leaving a `region` early frees it), and
 `switch x { case A: ... case B, C: ... default: ... }` (no fall-through).
 
 **Memory:** `world = arena()`, `world.new(Entity)` (zeroed, region-scoped),
@@ -233,7 +241,7 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
 
 ## 6. Tests
 
-`run.ps1` runs **51 checks**:
+`run.ps1` runs **58 checks**:
 1. **bootstrap**: runs `build.ps1` (pinned release → stage1 → stage2 + the fixpoint check).
 2. **goldens**: `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
    against `bin/stratac.exe <stage> examples/<name>.strata`, using the self-hosted
@@ -249,6 +257,10 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
    calling a Strata-built dll through its generated header.
 5. **performance guard**: a generated 20k-line file must type-check in under 3 s (it takes
    ~0.03 s; 1.3.0 took 17 s), so a quadratic regression fails the suite.
+6. **limits**: code nested 1,001 levels deep must be a clean error, and a 100,000-term
+   expression must compile quickly.
+7. **incremental build**: `projects/multi` is copied and built, one function body is
+   edited, and the rebuild must recompile exactly one C file.
 
 ---
 
@@ -305,6 +317,26 @@ performance if the compiler starts building very large strings.
 
 ---
 
+## 9b. Capacity (measured 2026-09-26, v1.5.0, 28-core Windows machine)
+
+| What | Result |
+|---|---|
+| Program size | linear: 1,000,000 lines check in 1.1 s / 1.1 GB, emit C in 3.1 s / 1.6 GB |
+| Modules | 20,000 modules check in 1.1 s (warm). A first read of thousands of new files is slow: Windows scans them |
+| Project build (250k lines, 1,001 modules) | full debug build 13.1 s; nothing changed 1.5 s; edit one function 2.4 s |
+| Nesting (parens, calls, blocks, unary) | **1,000 levels** (`max_nesting` in `parser.strata`); deeper is a clean error |
+| Operator chains (`a + b + ...`) | unlimited: iterative; 1,000,000 terms in 0.8 s |
+| String literal | 10 MB in 0.28 s |
+| Array literal | 1,000,000 items in 1.4 s |
+| Struct fields / function params | 50,000 fields and 10,000 params, both instant |
+| Statements in one function | 500,000 in 0.4 s |
+
+The nesting limit exists because the parser, checker and codegen recurse once per level.
+1,000 is far beyond real code, and safe even on a 1 MB thread stack, which is what an engine
+embedding libstrata may give it. `stratac ast` stops printing past 400 levels.
+
+---
+
 ## 10. Roadmap
 
 **Agreed order (2026-09-26):** build system (1.2.0, done) → public endpoints (1.3.0, done:
@@ -319,10 +351,12 @@ copies (one-pass join), token memory. Numbers are in the CHANGELOG. What's left:
   Slimming them is an AST-layout change across all phases.
 - `for i in 0..n` re-evaluates `n` every iteration. It's cheap now, but "evaluate once" is
   probably the right *semantics* (Go/Rust); decide before code starts relying on either.
-- No `break` / `continue` in the language yet.
 - The arena abandons the rest of a block when an allocation doesn't fit.
-- Build step 2 (per-module C files + incremental gcc) and step 3 (`stratac watch`) are
-  designed but not built; gcc, not stratac, is now the slow part of a build.
+- Builds: incremental + parallel split builds are done (1.5.0). What's left is gcc's
+  per-process start-up on Windows (~150 ms per C file). Bundling **tcc** for debug builds
+  is the next big win, then `stratac watch` (keep the program in memory, rebuild on save).
+- The compiler's own source can use `break`/`continue` once `compiler/bootstrap.txt` is
+  bumped to 1.5.0 or later (the bootstrap rule, §9).
 
 
 - **Tagged unions + pattern matching** — model AST nodes / game events cleanly (pairs with `switch`).

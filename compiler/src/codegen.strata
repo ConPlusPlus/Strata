@@ -84,31 +84,65 @@ string join_pieces(string[dynamic] pieces) { return strata_join(&pieces) }
 
 // ---- helpers -----------------------------------------------------------
 
-string cg_indent(int n) { string r = ""; for i in 0..n { r = r + "    "; } return r; }
+// Join pieces with a separator in one pass. (Building a string with `s = s + piece` in a
+// loop copies everything so far each time: quadratic for a 100k-item array literal.)
+string join_with(string[dynamic] pieces, string sep) {
+    string[dynamic] out = []
+    for i in 0..pieces.len {
+        if i > 0 { out.push(sep) }
+        out.push(pieces[i])
+    }
+    return strata_join(&out)
+}
+
+string cg_indent(int n) {
+    // capped: past 32 levels each line would carry depth*4 spaces (output ~ depth squared)
+    if n > 32 { n = 32 }
+    string[dynamic] p = []
+    for i in 0..n { p.push("    ") }
+    return strata_join(&p)
+}
 
 string cg_strip_us(string s) {   // C rejects `_` digit separators; drop them
-    string r = ""
-    for i in 0..s.len { if (s[i] != '_') { r = r + substr(s, i, 1); } }
-    return r
+    int n = s.len
+    bool any = false
+    for i in 0..n { if s[i] == '_' { any = true } }
+    if !any { return s }
+    string[dynamic] p = []
+    for i in 0..n { if (s[i] != '_') { p.push(substr(s, i, 1)); } }
+    return strata_join(&p)
 }
 
 // A literal's text arrives as written in the source (see lexer.strata), and every Strata
 // escape is a C escape, so it passes through. The one rewrite: `\0` becomes `\000`,
 // because in C a digit right after `\0` would extend it into a different octal escape.
 string cg_escape(string s) {
-    string r = ""
-    int i = 0
-    while (i < s.len) {
-        if (s[i] == '\\' && i + 1 < s.len) {
-            if (s[i + 1] == '0') { r = r + "\\000"; }
-            else                 { r = r + substr(s, i, 2); }
-            i += 2
+    int n = s.len
+    // the common case: no `\0` to widen, so the text passes through as is
+    bool any = false
+    int k = 0
+    while k + 1 < n {
+        if s[k] == '\\' {
+            if s[k + 1] == '0' { any = true }
+            k += 2
         } else {
-            r = r + substr(s, i, 1)
-            i += 1
+            k += 1
         }
     }
-    return r
+    if !any { return s }
+    string[dynamic] p = []
+    int i = 0
+    while (i < n) {
+        if (s[i] == '\\' && i + 1 < n) {
+            if (s[i + 1] == '0') { p.push("\\000"); }
+            else                 { p.push(substr(s, i, 2)); }
+            i += 2;
+        } else {
+            p.push(substr(s, i, 1))
+            i += 1;
+        }
+    }
+    return strata_join(&p)
 }
 
 // Map a Strata type NAME to its C spelling (struct/user names pass through unchanged).
@@ -199,7 +233,9 @@ string gen_call(Codegen* cg, Expr* e) {
                 string v = gen_expr(cg, e.items[0])
                 for i in 0..n { if (i > 0) { s = s + ", "; } s = s + v; }
             } else {
-                for i in 0..e.items.len { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
+                string[dynamic] a = []
+                for i in 0..e.items.len { a.push(gen_expr(cg, e.items[i])) }
+                s = s + join_with(a, ", ")
             }
             return s + "}"
         }
@@ -232,8 +268,46 @@ string gen_call(Codegen* cg, Expr* e) {
     }
 
     string s = gen_expr(cg, e.a) + "("
-    for i in 0..e.items.len { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
-    return s + ")"
+    string[dynamic] a = []
+    for i in 0..e.items.len { a.push(gen_expr(cg, e.items[i])) }
+    return s + join_with(a, ", ") + ")"
+}
+
+// The C around the left operand of binary expression `e`: prefix + <left> + suffix.
+// `b` is the right operand's C.
+struct BinParts { string pre; string post }
+
+BinParts gen_binary(Codegen* cg, Expr* e, string b) {
+    if (cg_is_mat_rt(e.a.rtype) || cg_is_quat_rt(e.a.rtype) || cg_is_mat_rt(e.b.rtype) || cg_is_quat_rt(e.b.rtype)) {
+        if (cg_is_mat_rt(e.a.rtype) && cg_is_mat_rt(e.b.rtype)) { return BinParts{ "mat4_mul(", ", " + b + ")" } }
+        if (cg_is_mat_rt(e.a.rtype) && cg_is_vec_rt(e.b.rtype)) { return BinParts{ "mat4_mul_vec4(", ", " + b + ")" } }
+        if (cg_is_quat_rt(e.a.rtype) && cg_is_quat_rt(e.b.rtype)) { return BinParts{ "quat_mul(", ", " + b + ")" } }
+        cg.had_error = true
+        return BinParts{ "", "" }
+    }
+    bool av = cg_is_vec_rt(e.a.rtype)
+    bool bv = cg_is_vec_rt(e.b.rtype)
+    if (av || bv) {
+        string vn = cg_vec_name_rt(e.a.rtype)
+        if (vn.len == 0) { vn = cg_vec_name_rt(e.b.rtype); }
+        if (e.text == "+") { return BinParts{ vn + "_add(", ", " + b + ")" } }
+        if (e.text == "-") { return BinParts{ vn + "_sub(", ", " + b + ")" } }
+        if (e.text == "*") {
+            if (av && bv) { return BinParts{ vn + "_mul(", ", " + b + ")" } }
+            if (av)       { return BinParts{ vn + "_scale(", ", " + b + ")" } }
+            return BinParts{ vn + "_scale(" + b + ", ", ")" }            // scalar * vector
+        }
+        cg.had_error = true
+        return BinParts{ "", "" }
+    }
+    if (cg_is_str_rt(e.a.rtype) || cg_is_str_rt(e.b.rtype)) {
+        if (e.text == "+")  { return BinParts{ "str_concat(", ", " + b + ")" } }
+        if (e.text == "==") { return BinParts{ "str_eq(", ", " + b + ")" } }
+        if (e.text == "!=") { return BinParts{ "(!str_eq(", ", " + b + "))" } }
+        cg.had_error = true
+        return BinParts{ "", "" }
+    }
+    return BinParts{ "(", " " + e.text + " " + b + ")" }
 }
 
 string gen_expr(Codegen* cg, Expr* e) {
@@ -249,42 +323,31 @@ string gen_expr(Codegen* cg, Expr* e) {
         case ExBinary:
             {
                 if (e.text == "..") { cg.had_error = true; return "0"; }   // ranges only in for..in
-                if (cg_is_mat_rt(e.a.rtype) || cg_is_quat_rt(e.a.rtype) || cg_is_mat_rt(e.b.rtype) || cg_is_quat_rt(e.b.rtype)) {
-                    string ma = gen_expr(cg, e.a)
-                    string mb = gen_expr(cg, e.b)
-                    if (cg_is_mat_rt(e.a.rtype) && cg_is_mat_rt(e.b.rtype)) { return "mat4_mul(" + ma + ", " + mb + ")"; }
-                    if (cg_is_mat_rt(e.a.rtype) && cg_is_vec_rt(e.b.rtype)) { return "mat4_mul_vec4(" + ma + ", " + mb + ")"; }
-                    if (cg_is_quat_rt(e.a.rtype) && cg_is_quat_rt(e.b.rtype)) { return "quat_mul(" + ma + ", " + mb + ")"; }
-                    cg.had_error = true
-                    return "0"
+                // Every binary form is prefix + LEFT + suffix ("(" a " + b)", "vec3_add(" a
+                // ", b)", ...), so a chain nesting down its left side is built in one pass,
+                // in a loop: no deep recursion, no re-copying the left side at each level.
+                Expr*[dynamic] spine = []
+                Expr* x = e
+                while x.kind == ExBinary && x.text != ".." {
+                    spine.push(x)
+                    x = x.a
                 }
-                bool av = cg_is_vec_rt(e.a.rtype)
-                bool bv = cg_is_vec_rt(e.b.rtype)
-                if (av || bv) {
-                    string vn = cg_vec_name_rt(e.a.rtype)
-                    if (vn.len == 0) { vn = cg_vec_name_rt(e.b.rtype); }
-                    string va = gen_expr(cg, e.a)
-                    string vb = gen_expr(cg, e.b)
-                    if (e.text == "+") { return vn + "_add(" + va + ", " + vb + ")"; }
-                    if (e.text == "-") { return vn + "_sub(" + va + ", " + vb + ")"; }
-                    if (e.text == "*") {
-                        if (av && bv) { return vn + "_mul(" + va + ", " + vb + ")"; }
-                        if (av)       { return vn + "_scale(" + va + ", " + vb + ")"; }
-                        return vn + "_scale(" + vb + ", " + va + ")"
-                    }
-                    cg.had_error = true
-                    return "0"
+                string inner = gen_expr(cg, x)
+                string[dynamic] pre = []
+                string[dynamic] post = []
+                int k = spine.len - 1
+                while k >= 0 {
+                    BinParts bp = gen_binary(cg, spine[k], gen_expr(cg, spine[k].b))
+                    pre.push(bp.pre)
+                    post.push(bp.post)
+                    k -= 1
                 }
-                if (cg_is_str_rt(e.a.rtype) || cg_is_str_rt(e.b.rtype)) {
-                    string sa = gen_expr(cg, e.a)
-                    string sb = gen_expr(cg, e.b)
-                    if (e.text == "+")  { return "str_concat(" + sa + ", " + sb + ")"; }
-                    if (e.text == "==") { return "str_eq(" + sa + ", " + sb + ")"; }
-                    if (e.text == "!=") { return "(!str_eq(" + sa + ", " + sb + "))"; }
-                    cg.had_error = true
-                    return "0"
-                }
-                return "(" + gen_expr(cg, e.a) + " " + e.text + " " + gen_expr(cg, e.b) + ")"
+                string[dynamic] out = []
+                int m = pre.len - 1
+                while m >= 0 { out.push(pre[m]); m -= 1 }
+                out.push(inner)
+                for i in 0..post.len { out.push(post[i]) }
+                return strata_join(&out)
             }
         case ExCall:  return gen_call(cg, e)
         case ExField:
@@ -319,16 +382,20 @@ string gen_expr(Codegen* cg, Expr* e) {
                 string elemc = "int64_t"
                 if (e.rtype != null && e.rtype.kind == TyDynArray && e.rtype.elem != null) { elemc = ty_to_c(e.rtype.elem); }
                 string s = "({ Array _a = arr_make(sizeof(" + elemc + "));"
+                string[dynamic] a = []
+                a.push(s)
                 for i in 0..e.items.len {
-                    s = s + " { " + elemc + " _e = " + gen_expr(cg, e.items[i]) + "; arr_push(&_a, &_e); }"
+                    a.push(" { " + elemc + " _e = " + gen_expr(cg, e.items[i]) + "; arr_push(&_a, &_e); }")
                 }
+                s = strata_join(&a)
                 return s + " _a; })"
             }
         case ExStructLit:
             {
                 string s = "(" + cname(e.type_name) + "){"
-                for i in 0..e.items.len { if (i > 0) { s = s + ", "; } s = s + gen_expr(cg, e.items[i]); }
-                return s + "}"
+                string[dynamic] a = []
+                for i in 0..e.items.len { a.push(gen_expr(cg, e.items[i])) }
+                return s + join_with(a, ", ") + "}"
             }
         case ExCast:   return "((" + ty_to_c(e.type) + ")(" + gen_expr(cg, e.a) + "))"
         case ExSizeof: return "((int64_t)sizeof(" + ty_to_c(e.type) + "))"
@@ -508,10 +575,9 @@ string func_sig(Decl* d) {
     string s = ty_to_c(d.ret) + " " + d.name + "("
     if (d.params.len == 0) { s = s + "void"; }
     else {
-        for i in 0..d.params.len {
-            if (i > 0) { s = s + ", "; }
-            s = s + ty_to_c(d.params[i].type) + " " + d.params[i].name
-        }
+        string[dynamic] ps = []
+        for i in 0..d.params.len { ps.push(ty_to_c(d.params[i].type) + " " + d.params[i].name) }
+        s = s + join_with(ps, ", ")
     }
     return s + ")"
 }
@@ -767,18 +833,18 @@ export string generate_header(Program prog, string guard, string source) {
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if d.module == 0 && d.is_exported && d.kind == DcEnum {
-            string e = "typedef enum {"
-            for m in 0..d.members.len { if m > 0 { e = e + "," } e = e + " " + d.members[m] }
-            out.push(e + " } " + d.name + ";\n")
+            string[dynamic] ms = []
+            for m in 0..d.members.len { ms.push(" " + d.members[m]) }
+            out.push("typedef enum {" + join_with(ms, ",") + " } " + d.name + ";\n")
         }
     }
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if d.module == 0 && d.is_exported && d.kind == DcStruct {
             out.push("typedef struct " + d.name + " " + d.name + ";\n")
-            string st = "struct " + d.name + " {\n"
-            for f in 0..d.fields.len { st = st + "    " + ty_to_c(d.fields[f].type) + " " + d.fields[f].name + ";\n" }
-            out.push(st + "};\n")
+            out.push("struct " + d.name + " {\n")
+            for f in 0..d.fields.len { out.push("    " + ty_to_c(d.fields[f].type) + " " + d.fields[f].name + ";\n") }
+            out.push("};\n")
         }
     }
     out.push("\n")

@@ -116,6 +116,24 @@ if ($LASTEXITCODE -eq 0 -and $t.TotalSeconds -lt 3) {
     Write-Host ("FAIL  perf/check-20k-lines ({0:N2} s, exit {1})" -f $t.TotalSeconds, $LASTEXITCODE) -ForegroundColor Red; $fail++
 }
 
+# --- limits: deep nesting is a clean error (not a crash); long chains stay linear ------
+$deep = Join-Path $perfDir "deep1001.strata"
+[IO.File]::WriteAllText($deep, "var x = " + ("(" * 1001) + "1" + (")" * 1001) + "`nprint(x)`n")
+$deepOut = (& $strata check $deep) -join "`n"
+if ($LASTEXITCODE -eq 1 -and $deepOut -match "nested too deeply \(more than 1000 levels\)") {
+    Write-Host "PASS  limits/nesting-1001-is-an-error" -ForegroundColor Green; $pass++
+} else {
+    Write-Host "FAIL  limits/nesting-1001-is-an-error (exit $LASTEXITCODE): $deepOut" -ForegroundColor Red; $fail++
+}
+$chain = Join-Path $perfDir "chain100k.strata"
+[IO.File]::WriteAllText($chain, "var x = " + ((@("1") * 100000) -join " + ") + "`nprint(x)`n")
+$t = Measure-Command { & $strata emit $chain | Out-Null }
+if ($LASTEXITCODE -eq 0 -and $t.TotalSeconds -lt 3) {
+    Write-Host ("PASS  limits/100k-term-expression ({0:N2} s)" -f $t.TotalSeconds) -ForegroundColor Green; $pass++
+} else {
+    Write-Host ("FAIL  limits/100k-term-expression ({0:N2} s, exit {1})" -f $t.TotalSeconds, $LASTEXITCODE) -ForegroundColor Red; $fail++
+}
+
 # --- embedding: host programs using libstrata and a Strata-built dll ---------------
 # tests/embed/ holds small "engines": C (the C API), C++ (strata.hpp), C# (Strata.cs, if a
 # .NET SDK is installed), and a C program calling tests/projects/lib's dll through its
