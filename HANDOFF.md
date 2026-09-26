@@ -1,33 +1,28 @@
 # Strata — Handoff
 
-> A complete, pick-up-cold guide to the Strata project: what it is, how the compiler
-> works, how to build/test/run it, what's implemented, what's in progress, and what's
-> planned. If you read one document, read this one, then dip into
-> [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
-> [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
+> The pick-up-cold guide: what Strata is, how the compiler works, how to build / test /
+> release it, what exists, what's limited, and what's next. Read this first; then
+> [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals),
+> [`CHANGELOG.md`](CHANGELOG.md) (per-version detail) and
+> [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design).
 
-Current version: **stratac 1.5.0** · tests: **58/58** · repo: **https://github.com/UseStrata/Strata**
+**Current:** stratac **1.5.0** · tests **58/58** · repo **https://github.com/UseStrata/Strata**
+· installed on this machine at `%LOCALAPPDATA%\Programs\strata` (on the user PATH)
 
 ---
 
 ## 1. What Strata is
 
-A statically-typed, **compiled** programming language **for games and real-time software**.
-It compiles to **plain C**, then to a native binary via a C compiler (gcc today; tcc
-planned for instant runs). Pitch: *"safer than C, simpler than Rust — the control C gives
-games, without the footguns or the borrow-checker fight."*
+A statically-typed, **compiled** language **for games and real-time software**. It compiles
+to **plain C**, then to a native binary with gcc. Pitch: *"safer than C, simpler than
+Rust: the control C gives games, without the footguns or the borrow-checker fight."*
 
-Four ideas:
-- **Arena / region memory** — no garbage collector, no manual `free`. *Everything in a
-  region dies together.*
-- **First-class data-oriented & math types** — `vec2/3/4`, `mat4`, quaternions (SoA planned).
-- **Seamless C interop** — it *is* C underneath; `import` a header, `link` a library, call C.
-- **Hot-reload** — planned runtime (not built yet).
-
-The compiler is **`stratac`**, and it is **written in Strata** (`compiler/src/`): it
-compiles itself. The build starts from a pinned, released `stratac` (see §3). It was
-originally written in **D--**, a separate C-compiling language (`C:\DMinusMinus`). That
-version is retired to `archive/dminusminus-seed/`.
+- **Arena / region memory**: no GC, no manual `free`. Everything in a region dies together.
+- **First-class math types**: `vec2/3/4`, `mat4`, `quat`, swizzles, operators.
+- **C interop**: it *is* C underneath: `import <header.h>`, `link "lib"`, call C directly.
+- **Embeddable**: `libstrata.dll` + a C API, so any engine can host the compiler.
+- **Self-hosted**: the compiler, `stratac`, is written in Strata and compiles itself.
+  (It was bootstrapped from D--, a separate language; that code is in `archive/`.)
 
 ---
 
@@ -35,372 +30,309 @@ version is retired to `archive/dminusminus-seed/`.
 
 ```
 Strata/
-├─ README.md              project front page
-├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.5.0)
-├─ Strata.md              the original founding plan
-├─ LICENSE                GPL-3.0 (the compiler)
-├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
-├─ CLA.md                 contributor license agreement (enables dual licensing)
-├─ COMMERCIAL.md          the paid commercial-license offer
-├─ TRADEMARK.md           the "Strata" name policy
+├─ HANDOFF.md  README.md  CHANGELOG.md  Strata.md (founding plan)
+├─ LICENSE (GPL-3.0)  LICENSE-RUNTIME.md  LICENSE-EMBEDDING.md  COMMERCIAL.md  CLA.md  TRADEMARK.md
 ├─ compiler/
-│  ├─ ARCHITECTURE.md     how the compiler is built (READ before touching src/)
-│  ├─ build.ps1           build all artifacts into bin/
-│  ├─ install.ps1         install the toolchain + add to PATH
-│  ├─ package.ps1         build a release .zip into dist/
-│  ├─ src/                THE COMPILER, written in Strata (see §4)
-│  ├─ bootstrap.txt       the pinned release version the build bootstraps from
-│  ├─ build/              bootstrap compilers: cached release + stage1/2 (gitignored)
-│  ├─ lib/                the RUNTIME the compiled programs link against (see §7)
-│  ├─ examples/           sample .strata programs (see §8)
-│  ├─ tests/              golden-file tests + run.ps1 (see §6)
-│  ├─ bin/                build output (gitignored)
-│  └─ dist/               release archives (gitignored)
-├─ website/design/DESIGN.md   the language design ("proposal to react to")
-├─ editors/              syntax highlighting: VS Code + Visual Studio (see editors/README.md)
-└─ archive/               retired: the D-- compiler + the D--→Strata translator
+│  ├─ ARCHITECTURE.md    compiler internals (read before touching src/)
+│  ├─ build.ps1          bootstrap + build bin/stratac.exe, console.exe, libstrata.dll
+│  ├─ bootstrap.txt      the release version the build bootstraps from (currently 1.1.0)
+│  ├─ install.ps1        install to %LOCALAPPDATA%\Programs\strata + PATH (-Uninstall)
+│  ├─ package.ps1        release zip into dist/
+│  ├─ src/               THE COMPILER, in Strata (§4)
+│  ├─ lib/               the C runtime compiled programs use (§7)
+│  ├─ api/               libstrata's project file + strata.h / strata.hpp / Strata.cs (§6)
+│  ├─ examples/          sample programs, also the golden-test inputs (§8)
+│  ├─ tests/             run.ps1 + goldens + test projects + embedding hosts (§9)
+│  └─ bin/ build/ dist/  build output, bootstrap compilers, release zips (gitignored)
+├─ editors/              VS Code + Visual Studio syntax highlighting (generated grammar)
+├─ website/design/       DESIGN.md: the language design
+└─ archive/              retired: the D-- compiler + D--→Strata translator (see its README)
 ```
 
 ---
 
-## 3. Toolchain & how to build / run / test
+## 3. Build, test, run, release
 
-**Prerequisites (already set up on this machine):**
-- **gcc** — via MSYS2 at `C:\msys64\mingw64\bin` (on PATH). Strata shells out to it.
-- **raylib** — installed via MSYS2 (`C:\msys64\usr\bin\pacman.exe -S mingw-w64-x86_64-raylib`),
-  for the graphical examples.
+**Prerequisites (set up on this machine):** gcc via MSYS2 (`C:\msys64\mingw64\bin`, on PATH);
+raylib via MSYS2 for the graphical examples; .NET SDK (optional, for the C# embedding test).
+The D-- compiler (`C:\DMinusMinus\dec.exe`) is **no longer needed**.
 
-**Build the compiler** (produces `stratac.exe`, `console.exe`, `libstrata.dll` in `bin/`):
 ```
-powershell -ExecutionPolicy Bypass -File compiler\build.ps1
+powershell -ExecutionPolicy Bypass -File compiler\build.ps1        # bootstrap + build
+powershell -ExecutionPolicy Bypass -File compiler\tests\run.ps1    # build + all 58 checks
+powershell -ExecutionPolicy Bypass -File compiler\install.ps1      # rebuild + install globally
 ```
-This is a **bootstrap**. stage0 is the pinned release named in `compiler/bootstrap.txt`,
-downloaded from GitHub once and cached in `build/`. Pass `-Bootstrap <stratac.exe>` to
-use another compiler; if the download fails, the installed `stratac` on PATH is used.
-Then stage0 builds `src/stratac.strata` → `stage1.exe`, and stage1 builds it again →
-`stage2.exe`. The build **fails unless stage1 and stage2 emit byte-identical C** (the
-fixpoint). stage2 is copied to `bin/stratac.exe`.
 
-Quick iteration on the compiler: `compiler\bin\stratac.exe build compiler\src\stratac.strata`
-(produces `src\stratac.exe`), then run the full `build.ps1` + tests before committing.
+**The bootstrap** (`build.ps1`): stage0 = the release named in `bootstrap.txt`, downloaded
+from GitHub once and cached in `compiler/build/` (`-Bootstrap <exe>` overrides; offline it
+falls back to the installed `stratac`). stage0 builds `src/stratac.strata` → stage1; stage1
+builds it again → stage2. **The build fails unless stage1 and stage2 emit byte-identical C**
+(the fixpoint). stage2 ships as `bin/stratac.exe`; `console.exe` is built by it;
+`libstrata.dll` is built from `compiler/api/strata.toml`.
 
-**Use the compiler:**
+**Quick iteration on the compiler:** `compiler\bin\stratac.exe build compiler\src\stratac.strata`
+→ `src\stratac.exe` (don't make a compiler overwrite its own running exe). Run the full
+`run.ps1` before committing.
+
+**Using the compiler:**
 ```
-stratac new    <name>                 # create a project: strata.toml + src/main.strata
+stratac new    <name>                                     # project: strata.toml + src/main.strata
 stratac run    [target] [--release] [--force] [-- args]   # build and run
-stratac build  [target] [--release] [--force]             # build an exe or dll
-stratac check  [target]               # type-check only
-stratac emit   [target]               # print the generated C
-stratac ast    <file.strata>          # parsed AST (one file)
-stratac tokens <file.strata>          # lexer output
+stratac build  [target] [--release] [--force]             # exe or dll
+stratac check  [target]                                   # type-check only
+stratac emit   [target]                                   # print the generated C
+stratac ast | tokens <file.strata>                        # debugging views of one file
 ```
 A *target* is a `.strata` file, a project folder, a `strata.toml`, or nothing (the project in
-the current folder). `stratac` finds its runtime `lib/` next to the executable (it passes
-`-I <lib>` to gcc).
+the current folder). A single `.strata` file builds `-O2` into `<name>.exe` beside it.
 
-**Embedding** (engines, editors, tools): link `libstrata.dll` and include `strata.h`
-(C), `strata.hpp` (C++) or `Strata.cs` (C#), all in `compiler/api/` and installed to
-`<prefix>/include/`. The API: check, emit C, build, read diagnostics, reset memory. A
-Strata project with `output = "dll"` is a library a host can call; its build writes
-`<name>.h` and `<name>.dll.a` next to the dll.
+**Projects (`strata.toml`)** — every key is documented at the top of `src/project.strata`:
+`[project]` name / entry / output (`exe`|`dll`) / out_dir; `[build]` defines, include_dirs,
+lib_dirs, libs, c_sources, release, split; `[windows]`/`[linux]`/`[macos]` per-platform libs.
+Project builds are **incremental and parallel** (§4, "Split builds").
 
-**Projects (`strata.toml`)**: see the comment at the top of `src/project.strata` for every
-key. The main ones:
-- `[project]`: `name`, `entry`, `output = "exe" | "dll"`, `out_dir`
-- `[build]`: `defines`, `include_dirs`, `lib_dirs`, `libs`, `c_sources`, `release`
-- `[windows]` / `[linux]` / `[macos]`: per-platform `libs` (etc.)
-
-Project builds are **incremental and parallel**. The program is split into C files: a
-shared header with the types, and chunks of modules, about two per core. Each file
-declares only the exports of the modules it imports, and each has its own cache key. So
-editing a function body recompiles one chunk, and changing an export recompiles only its
-importers. gcc runs in parallel, started directly with response files (no `cmd.exe`).
-`[build] split = false` gives one C file instead (libstrata uses this, because
-`strata_host.h` keeps process state in `static`s). In split builds, the runtime's state
-lives once in the main module's file (`lib/sstate.h`: `STRATA_SPLIT` / `STRATA_MAIN_TU`).
-
-**Test** (rebuilds `stratac`, runs every golden byte-for-byte):
-```
-powershell -ExecutionPolicy Bypass -File compiler\tests\run.ps1
-```
-
-**Install** to `%LOCALAPPDATA%\Programs\strata` and add to PATH: `compiler\install.ps1`.
-**Editor highlighting:** `editors\vscode\install.ps1` (VS Code, no admin) and
-`editors\visualstudio\install.ps1` (Visual Studio, asks for admin). The grammar is generated by
-`python editors\build_grammar.py`; when you add a keyword, type or built-in, add it there too.
-**Package** a release zip: `compiler\package.ps1 -Version X.Y.Z` (into `dist/`).
+**Releasing a version** (the established process):
+1. Bump `export string stratac_version()` in `compiler/src/version.strata` (and
+   `editors/vscode/package.json`); add a `CHANGELOG.md` section; update this file.
+2. `run.ps1` must pass. Commit to `main`, tag `vX.Y.Z`.
+3. Verify from a clean checkout: `git worktree add <tmp> vX.Y.Z`, run its `run.ps1`, then
+   `package.ps1 -Version X.Y.Z` there (so the zip's binaries match the tag).
+4. `git push origin main vX.Y.Z`; `gh release create vX.Y.Z <zip> --title ... --notes ...`.
+5. `install.ps1 -NoBuild` to update the machine's global `stratac`.
 
 ---
 
 ## 4. How the compiler works
 
-A strict, one-way pipeline (the anti-spaghetti design — see ARCHITECTURE.md):
+A strict one-way pipeline, one file per phase, phases talking only through data:
 
 ```
-file.strata → lexer → tokens → parser → AST → checker → typed AST → codegen → C → gcc → .exe
+file.strata → lexer → parser → (module loader) → checker → codegen → C → gcc → exe / dll
 ```
 
-Each phase is one file in `compiler/src/`, communicating only through data structures:
-
-| File | Role |
+| `compiler/src/` | Role |
 |---|---|
-| `token.strata` | token kinds + `Token` (shared data) |
-| `ast.strata` | AST node types (`TypeNode`/`Expr`/`Stmt`/`Decl`), tag + fat-struct + `new_*` ctors; `Module`/`Program` |
-| `lexer.strata` | text → tokens. Significant newlines (Go-style), `..` range, types-first |
-| `parser.strata` | tokens → AST. Recursive descent; paren-free control flow via a `no_brace` flag |
-| `modules.strata` | the module loader: parses each file, builds the module table |
-| `checker.strata` | AST → validated/typed AST. Name resolution + module visibility, types, `var` inference; writes each expression's resolved type onto `Expr.rtype` for codegen |
-| `codegen.strata` | typed AST → C. Reads `rtype` for operator overloading (`vec3_add`, `.`/`->`, etc.) |
-| `core.strata` | umbrella module: `export import`s every phase = the compiler CORE, **no `main`** (the "library") |
-| `dump.strata` | renders tokens/AST to text (front-end utility) |
-| `project.strata` | build system: reads `strata.toml` (a TOML subset) into a `Project` |
-| `build.strata` | build system: the pipeline (load → check → C → gcc/link), dll output, the cache |
-| `libstrata.strata` | the public embedding API (`strata_*`), built as `libstrata.dll` by `compiler/api/strata.toml` |
-| `version.strata` | the version string (shared by the CLI and the library) |
-| `strata_host.h` | C helpers the compiler imports: the message sink (print vs capture), memory reset, finding lib/ |
-| `stratac.strata` | front-end #1: the CLI (targets, flags, `new`) |
-| `console.strata` | front-end #2: a tokens+AST explorer (proves the core is reusable) |
+| `token`, `ast` | shared data: tokens; AST nodes (`TypeNode`/`Expr`/`Stmt`/`Decl`), `Module`, `Program` |
+| `lexer` | text → tokens. Newlines end statements (not inside `(`/`[`); `;` optional. Interns identifiers |
+| `parser` | tokens → AST, recursive descent; nesting limit (`max_nesting`, 1,000) |
+| `modules` | the loader: parses each imported file once → one `Program` + module table |
+| `hashidx` | a small hash index (checker name tables, lexer interning) — Strata has no map type yet |
+| `checker` | names + module visibility, types, `var` inference; writes each expr's type to `Expr.rtype` |
+| `codegen` | typed AST → C (one file, or split per module chunk); reads `rtype` for operator lowering |
+| `core` | umbrella: `export import`s every phase = the compiler as a library (no `main`) |
+| `project`, `build` | the build system: `strata.toml`; pipeline, cache, split builds, dll + header |
+| `libstrata` | the public embedding API (`strata_*` exports) |
+| `stratac`, `console`, `dump`, `version` | CLI front-end, explorer front-end, printers, version string |
+| `strata_host.h` | C helpers the compiler imports: message sink (print vs capture), memory reset, lib/ lookup, one-pass string join, array free, file-exists, parallel gcc runner |
 
-**Key ideas:**
-- **The core has no `main`.** `stratac`, `console`, and `libstrata.dll` are thin front-ends
-  over the same core — so the same code ships as an exe, a DLL, or (later) an LSP server.
-- **Compiles to C** (not C++). Every language feature must lower to plain C; all the
-  ergonomic sugar is resolved in the checker and gone by codegen (zero runtime cost).
-- **`Expr.rtype`** — the checker annotates every expression with its resolved type. Codegen
-  uses this to pick the right C (e.g. `a + b` → `vec3_add(a,b)` when `a` is a vec3, `.` vs
-  `->` for field access, `sizeof` for `alloc`, element casts for dynamic arrays).
-- **Modules** (`src/modules.strata`): `load_program` parses the root file and each
-  imported module *separately* (each file once), tags every declaration with its module,
-  and builds the module table. The checker enforces visibility from that table and gives
-  colliding private names module-prefixed C names.
+**Key ideas**
+- **Everything lowers to plain C**; sugar is resolved in the checker, gone by codegen.
+- **`Expr.rtype`**: codegen picks C from the checked types (`a + b` → `vec3_add(a, b)`,
+  `.` vs `->`, element casts for dynamic arrays). Named result types share one node each.
+- **Modules** are parsed per file; every `Decl` records its module. The checker enforces
+  visibility and gives **colliding private names** module-prefixed C names
+  (`mods_shapes__helper`).
+- **Split builds** (projects, default): a shared header with all types, then module
+  **chunks** (~2 per core) as separate C files. Each file declares only the exports of the
+  modules it imports, so editing a body recompiles one chunk and changing an export
+  recompiles only its importers. gcc runs in parallel, started directly with response files.
+  Runtime state is defined once, in the main module's file (`lib/sstate.h`).
+  `split = false` gives one C file (libstrata needs that: `strata_host.h` keeps `static`s).
+- **Messages** go through `strata_report` (printed by the CLI, captured by libstrata).
+- **Performance rules learned the hard way:** never build strings with `s = s + x` in a
+  loop (quadratic) — collect pieces and `strata_join` / `join_with`; walk left-deep
+  operator chains in a loop, not recursively; long strings made by the runtime have their
+  length remembered (`lib/sstr.h`), so `.len` / `substr` on them are O(1).
 
 ---
 
-## 5. The language today (what's implemented)
+## 5. The language today
 
-**Feel:** types-first (C#-like), `var` inference, newline-terminated (`;` optional, as a
-separator for several statements on one line; newlines inside `(`/`[` don't count), braces for
-blocks, paren-free control flow. Source files: `.strata` (canonical) / `.str` (alias).
+**Feel:** types-first (C#-like), `var` inference, braces, paren-free control flow, newlines
+end statements (`;` optional). Files: `.strata` (or `.str`).
 
-**Types:** `int` (=i64), `float` (=f32), `bool`, `char`, `string` (a C `const char*`),
-sized ints (`i8..u64`, `f32/f64`), `vec2/3/4`, `mat4`, `quat`, `structs`, `enums`,
-pointers (`T*`), and dynamic arrays (`T[dynamic]`).
-
-**Declarations & functions** (types-first):
 ```strata
 struct Entity { vec3 pos; int hp }
 enum State { Idle, Walk, Jump }
-int add(int a, int b) { return a + b }
-var x = 5                 // inference
-vec3 v = vec3(1, 0, 0)    // explicit
-const PI2 = 6.283
+export int add(int a, int b) { return a + b }      // export: visible to importers
+var x = 5
+vec3 v = vec3(1, 0, 0) * 2.0
+for i in 0..10 { if i % 2 == 0 { continue }; print(i) }
 ```
 
-**Control flow:** `if`/`else`, `while`, `for x in 0..n`, `for x in array`, `break` / `continue`
-(a `break` inside a `switch` leaves the loop; leaving a `region` early frees it), and
-`switch x { case A: ... case B, C: ... default: ... }` (no fall-through).
-
-**Memory:** `world = arena()`, `world.new(Entity)` (zeroed, region-scoped),
-`region name { ... }` (scoped, freed at block end), `alloc(value)` (boxes a value in a
-global heap → pointer), `null`. `.` auto-dereferences pointers.
-
-**Math:** first-class operators on `vec`/`mat`/`quat` (`+ - *`, scalar scale), swizzles
-(`v.xy`, chained), and builtins `dot`, `cross`, `length`, `normalize`,
-`mat4_translate/scale/rotate/perspective/look_at`, `quat_axis_angle/rotate/to_mat4/normalize`.
-
-**Casts & sizes:** `cast<T>(x)` (scalar↔scalar, pointer↔pointer, pointer↔int; anything
-else is a checker error) and `sizeof(T)` (an `int`). Both are keywords.
-
-**Strings:** `+` (concat), `.len`, `==`/`!=`, indexing `s[i]` (a `char`), and built-ins
-`substr(s, start, len)`, `int_to_str(n)`, `cstr(s)`.
-
-**Files & process:** `read_file(path)` ("" on failure), `write_file(path, data)` (bool),
-`args()` (the command line, `string[dynamic]`).
-
-**Dynamic arrays:** literals `[a, b, c]`, `.push(v)`, `.len`, indexing (incl. lvalue
-`xs[i].field = ...`), `for x in xs`.
-
-**Prelude (always in scope):** `min`, `max`, `clamp`, `lerp`, `PI`.
-
-**C interop:** `import <raylib.h>` / `import "foo.h"` (emit `#include`), `link "raylib"`
-(add `-lraylib`), then call C functions and reference C constants directly.
-
-**Modules:** every file is a module; top-level declarations are **private** unless marked
-`export`. `import gfx.Renderer` loads `<project root>/gfx/Renderer.strata` (the root is
-the main file's folder) and makes its exports visible to *this* file only (imports aren't
-transitive). `export import X` re-exports X (umbrella modules, like `core`). Private names
-may repeat across modules (they get module-prefixed C names); exported names must be
-unique. Modules may contain only declarations. Tests: `examples/modules2.strata` +
-`examples/mods/`, and the error goldens `check/modvis`, `check/modload`, `check/modpriv`.
-
-**Designed but NOT yet implemented:** expression-bodied functions (`f(x) = expr`), default
-& named arguments, region-escape safety checking.
+- **Types:** `int` (64-bit), `float` (32-bit), `bool`, `char`, `string` (a C `const char*`),
+  sized `i8..u64`/`f32`/`f64`, `vec2/3/4`, `mat4`, `quat`, structs, enums, pointers `T*`,
+  dynamic arrays `T[dynamic]` (literals, `.push`, `.len`, indexing, `for x in xs`).
+- **Control flow:** `if`/`else`, `while`, `for i in a..b`, `for x in array`,
+  `break`/`continue` (a `break` in a `switch` leaves the loop), `switch` (no fall-through,
+  `case A, B:`, `default:`).
+- **Memory:** `world = arena()` + `world.new(T)`, `region name { ... }` (freed at the end, and
+  on `break`/`continue`/`return`), `alloc(value)` (global heap), `null`; `.` auto-derefs.
+- **Math:** vector/matrix/quaternion operators, swizzles (`v.xy`), `dot`, `cross`, `length`,
+  `normalize`, `mat4_*`, `quat_*`; prelude `min`, `max`, `clamp`, `lerp`, `PI`.
+- **Strings & I/O:** `+`, `.len`, `==`, `s[i]`, `substr`, `int_to_str`, `cstr`,
+  `read_file`, `write_file`, `args()`.
+- **Casts:** `cast<T>(x)` (scalar↔scalar, pointer↔pointer, pointer↔int), `sizeof(T)`.
+- **Modules:** every file is a module; declarations are **private unless `export`ed**.
+  `import gfx.Renderer` loads `<root>/gfx/Renderer.strata` (root = the main file's folder);
+  imports are **not transitive**; `export import X` re-exports. Modules hold declarations
+  only. Missing/private/unimported/conflicting names get errors that say how to fix them.
+- **C interop:** `import <x.h>` / `import "x.h"`, `link "lib"`; unknown names resolve as C
+  once a header is imported. Single-header C libraries can check `STRATA_PROGRAM` to
+  compile their implementation (see `lib/crossplatform.h`).
+- **Designed, not built:** tagged unions + pattern matching, expression-bodied functions,
+  default/named arguments, qualified names (`shapes.area`), module-level constants /
+  globals, region-escape checking.
 
 ---
 
-## 6. Tests
+## 6. Embedding (engines, editors, tools)
 
-`run.ps1` runs **58 checks**:
-1. **bootstrap**: runs `build.ps1` (pinned release → stage1 → stage2 + the fixpoint check).
-2. **goldens**: `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
-   against `bin/stratac.exe <stage> examples/<name>.strata`, using the self-hosted
-   compiler. Stages: `tokens`, `ast`, `check`, `run`, and `emit`. The `emit` goldens pin
-   the generated C for every example.
-   Add a test by dropping a `.expected` file in the right folder.
-3. **projects**: each folder in `compiler/tests/projects/` is a real project. It's run
-   (or, for a dll, built) with `--force` and compared to its `expected.txt`, and a second
-   build must be cached ("up to date").
-4. **embedding** (`compiler/tests/embed/`): host programs that embed the compiler from C
-   (every API function, plus a flat-memory check over 300 compile + reset cycles), C++
-   (`strata.hpp`) and C# (`Strata.cs`; skipped without a .NET SDK), and a C program
-   calling a Strata-built dll through its generated header.
-5. **performance guard**: a generated 20k-line file must type-check in under 3 s (it takes
-   ~0.03 s; 1.3.0 took 17 s), so a quadratic regression fails the suite.
-6. **limits**: code nested 1,001 levels deep must be a clean error, and a 100,000-term
-   expression must compile quickly.
-7. **incremental build**: `projects/multi` is copied and built, one function body is
-   edited, and the rebuild must recompile exactly one C file.
+`libstrata.dll` + `compiler/api/strata.h` (C), `strata.hpp` (C++), `Strata.cs` (C#,
+P/Invoke). Installed to `<prefix>/include/` with `libstrata.dll.a`. **Any engine may embed
+it under any license** (`LICENSE-EMBEDDING.md`, the Classpath exception).
+
+API: `strata_check` / `strata_check_source` (unsaved editor text), `strata_emit(_source)`,
+`strata_build` / `strata_output_path`, `strata_diagnostics` (messages are captured),
+`strata_set_libdir` (default: `lib/` next to the dll), `strata_reset` (frees all compiler
+memory: engines can recompile indefinitely), `strata_version`. Not thread-safe.
+
+A Strata project with `output = "dll"` exports exactly its entry module's `export`ed
+functions and gets a generated `<name>.h` + `<name>.dll.a` beside the dll.
 
 ---
 
-## 7. The runtime (`compiler/lib/`)
-
-Header-only C the *compiled program* links against (not the compiler). Carries the GPL
-**runtime linking exception**, so programs built with Strata are not GPL-covered.
+## 7. The runtime (`compiler/lib/`, header-only C; GPL + runtime linking exception)
 
 | File | Provides |
 |---|---|
-| `arena.h` | the arena/region allocator + the global heap for `alloc` (`strata_heap`) |
-| `smath.h` | `vec2/3/4`, `mat4`, `quat` and their operations |
-| `sstr.h` | string concat/eq/len/`substr`/`int_to_str` (a lazy global string arena) |
+| `arena.h` | arenas / regions; the global heap for `alloc` |
+| `sstr.h` | strings: concat, eq, len, substr, int_to_str; remembers long strings' lengths |
+| `sarr.h` | dynamic arrays (tracked so a host can free them all) |
 | `sio.h` | `read_file`, `write_file`, `args()` |
-| `sarr.h` | the type-erased dynamic array (`Array`) |
-| `sprelude.h` | prelude helpers (`sp_min`/`max`/`clamp`/`lerp`, `SP_PI`) |
-| `crossplatform.h` | platform layer (window, ...), single-header; auto-implemented in Strata programs via `STRATA_PROGRAM`. See its top comment for adding sections |
+| `smath.h` / `sprelude.h` | vectors, matrices, quaternions / min, max, clamp, lerp, PI |
+| `sstate.h` | `STRATA_STATE`: runtime state is `static`, or shared across a split build's files |
+| `crossplatform.h` | single-header platform layer (a Window section so far; per-section opt-outs) |
+
+**Rule:** the bootstrap release compiles the compiler against *its own* older `lib/`. So a
+new runtime function the compiler uses must be guarded (`#ifdef STRATA_ARR_TRACKED`,
+`STRATA_STR_LEN_CACHE`) or live in `src/strata_host.h` instead.
 
 ---
 
 ## 8. Examples (`compiler/examples/`)
 
-`hello` (structs + vec3 + arena, the flagship), `run1` (functions/recursion),
-`arena` (regions), `vectors`, `matrix` (mat4/quat/swizzles), `arrays` (`T[dynamic]`),
-`switch` (enums + switch), `strings`, `interop` (calling libc), `list` (linked list via
-alloc+null), `casts` (`cast<T>`/`sizeof`), `prelude`, `modules`+`greetlib` (import). Graphical (raylib): `window`,
-`sprite` (arrow-key movement), `balls` (60 bouncing entities in a `Ball[dynamic]`).
+`hello` (flagship), `run1`, `arena`, `vectors`, `matrix`, `arrays`, `switch`, `strings`,
+`interop`, `list` (alloc + null), `casts`, `prelude`, `loops` (break/continue),
+`modules` + `greetlib`, `modules2` + `mods/` (the module system), `crossplatform` (a window
+via `lib/crossplatform.h`). Graphical (open a window; build, don't auto-run): `window`,
+`sprite`, `balls`. Error cases: `errors`, `breakerr`, `modvis`, `modload`, `modpriv`.
 
 ---
 
-## 9. Self-hosting — how to work on the compiler
+## 9. Tests (`compiler/tests/run.ps1`: 58 checks)
 
-**The compiler source is `compiler/src/*.strata`.** It has been self-hosted since v1.0.0
-and moved to `src/` after v1.1.0. The D-- original is in `archive/dminusminus-seed/`.
-
-How it got here: a translator (now archived) ported every D-- module mechanically, and every
-failure was fixed in Strata or the translator rather than by hand-editing the port. That
-turned up about a dozen real Strata bugs and gaps. The Strata compiler then reproduced
-itself byte-for-byte (the fixpoint), and the build now always checks that.
-
-**The bootstrap rule:** stage0 is the release pinned in `compiler/bootstrap.txt`, so the
-compiler's *own source* may only use language features that release supports. You can add
-any feature *to* the language freely. But before the compiler's own code *uses* one:
-release a version containing it, then bump `bootstrap.txt` to that version. That's how Go
-and Rust bootstrap.
-
-**Style debt:** the port is a literal translation, so it still reads like D-- (parenthesized
-conditions, `;` inside one-line blocks, `0 - 1`). It's all valid Strata; clean it up
-opportunistically. The emit goldens and the fixpoint check catch mistakes.
-
-**Strings:** Strata strings are NUL-terminated C strings and `.len` is `strlen` (O(n)). The
-lexer keeps literal text as written, so the compiler never needs a NUL in a string. Watch
-performance if the compiler starts building very large strings.
+1. **Bootstrap + fixpoint** (runs `build.ps1`).
+2. **Goldens:** `tests/<stage>/<name>.expected` vs `stratac <stage> examples/<name>.strata`,
+   byte-for-byte; stages `tokens`, `ast`, `check`, `run`, `emit` (`emit` pins the generated
+   C). Add a test by adding a `.expected` file.
+3. **Projects:** each `tests/projects/<name>/` is run (or, for a dll, built) with `--force`
+   against `expected.txt`, then must rebuild as "up to date". `native` (C sources, defines,
+   per-platform libs), `lib` (dll), `multi` (split build: state + crossplatform.h across
+   files), `badtoml` (project-file errors).
+4. **Incremental:** editing one function body in a copy of `multi` recompiles one C file.
+5. **Embedding** (`tests/embed/`): C, C++, C# hosts using libstrata (incl. 300
+   compile+reset cycles with flat memory), and a C host calling a Strata-built dll.
+6. **Performance & limits:** 20k lines must check in < 3 s; 1,001-deep nesting must be a
+   clean error; a 100,000-term expression must compile quickly.
 
 ---
 
-## 9b. Capacity (measured 2026-09-26, v1.5.0, 28-core Windows machine)
+## 10. Capacity (measured 2026-09-26, v1.5.0, 28-core Windows machine)
 
 | What | Result |
 |---|---|
-| Program size | linear: 1,000,000 lines check in 1.1 s / 1.1 GB, emit C in 3.1 s / 1.6 GB |
-| Modules | 20,000 modules check in 1.1 s (warm). A first read of thousands of new files is slow: Windows scans them |
-| Project build (250k lines, 1,001 modules) | full debug build 13.1 s; nothing changed 1.5 s; edit one function 2.4 s |
-| Nesting (parens, calls, blocks, unary) | **1,000 levels** (`max_nesting` in `parser.strata`); deeper is a clean error |
-| Operator chains (`a + b + ...`) | unlimited: iterative; 1,000,000 terms in 0.8 s |
-| String literal | 10 MB in 0.28 s |
-| Array literal | 1,000,000 items in 1.4 s |
-| Struct fields / function params | 50,000 fields and 10,000 params, both instant |
-| Statements in one function | 500,000 in 0.4 s |
-
-The nesting limit exists because the parser, checker and codegen recurse once per level.
-1,000 is far beyond real code, and safe even on a 1 MB thread stack, which is what an engine
-embedding libstrata may give it. `stratac ast` stops printing past 400 levels.
+| Program size | linear: 1,000,000 lines check in 1.1 s / 1.1 GB; emit in 3.1 s / 1.6 GB |
+| Modules | 20,000 modules check in 1.1 s (warm; a first read of thousands of new files is slow — Windows scans them) |
+| 81k-line project | check 0.14 s / 92 MB; full debug build 4.1 s; release 4.9 s; edit one function → 1.0 s |
+| 250k-line, 1,001-module project | full debug build 13.1 s; nothing changed 1.5 s; edit one function 2.4 s |
+| Nesting (parens, calls, blocks, unary) | 1,000 levels; deeper is a clean error (safe on a 1 MB thread stack) |
+| Operator chains / strings / arrays | 1,000,000-term expression 0.8 s; 10 MB string 0.28 s; 1,000,000-item array 1.4 s |
 
 ---
 
-## 10. Roadmap
+## 11. Known limitations
 
-**Agreed order (2026-09-26):** build system (1.2.0, done) → public endpoints (1.3.0, done:
-`libstrata` C API, C++/C# wrappers, generated dll headers) → compiler speed + memory (1.4.0,
-done). Later: integrations for commercial engines (Unity, Unreal: e.g. MSVC `.lib`
-import libraries, engine plugins). Any engine may embed Strata (`LICENSE-EMBEDDING.md`).
-
-**Performance (1.4.0):** fixed: quadratic string length (runtime remembers lengths of long
-strings, `lib/sstr.h`), linear name lookups (hash indexes in the checker), repeated output
-copies (one-pass join), token memory. Numbers are in the CHANGELOG. What's left:
-- Memory is now mostly the syntax tree: `Expr`/`Stmt` are wide structs (~130/250 bytes).
-  Slimming them is an AST-layout change across all phases.
-- `for i in 0..n` re-evaluates `n` every iteration. It's cheap now, but "evaluate once" is
-  probably the right *semantics* (Go/Rust); decide before code starts relying on either.
-- The arena abandons the rest of a block when an allocation doesn't fit.
-- Builds: incremental + parallel split builds are done (1.5.0). What's left is gcc's
-  per-process start-up on Windows (~150 ms per C file). Bundling **tcc** for debug builds
-  is the next big win, then `stratac watch` (keep the program in memory, rebuild on save).
-- The compiler's own source can use `break`/`continue` once `compiler/bootstrap.txt` is
-  bumped to 1.5.0 or later (the bootstrap rule, §9).
-
-
-- **Tagged unions + pattern matching** — model AST nodes / game events cleanly (pairs with `switch`).
-- **M4: SoA / `#soa` arrays** — the data-oriented layout layer.
-- **M5: hot-reload runtime** — DLL + host + persistent arena (the Handmade/Jai pattern).
-- **M6: Godot GDExtension target.**
-- Smaller: a bundled **tcc** for zero-dependency `stratac run`; the designed-but-unbuilt
-  sugars (expression-bodied functions, default/named args); qualified names (`shapes.area`)
-  to disambiguate imports; module-level constants.
+- **Windows only** for `stratac` itself (it runs gcc via cmd, writes `.exe`). Generated C and
+  `crossplatform.h` are portable; the toolchain isn't yet.
+- **Needs gcc** to build programs (check/emit don't). Bundling tcc is planned.
+- **Build cache** doesn't track C headers your program `import`s — use `--force` after
+  editing one.
+- **`link "x"`** only produces `-lx`; library paths / flags / frameworks need a `strata.toml`.
+- **MSVC-based engines** can load `libstrata.dll` at runtime but not link it (no `.lib` yet).
+- **libstrata** is single-threaded.
+- **Strings** are NUL-terminated C strings: no `\0` inside a string.
+- **`for i in 0..n`** re-evaluates `n` each iteration (a semantics decision is pending).
+- **No globals / module constants**; top-level `const` is a local of `main`.
+- **Memory** is mostly the AST (`Expr` 104 B, `Stmt` 184 B); arenas never free early.
 
 ---
 
-## 11. Project / process facts
+## 12. What's next (and open decisions)
 
-- **Git:** commit to `main` (solo, linear); every version gets a `vX.Y.Z` tag and a GitHub
-  Release; `package.ps1` builds the release `.zip` an installer could pull. `.gitattributes`
-  forces LF; `.gitignore` excludes `bin/`, `dist/`, generated `.c`/`.exe`, `.vs/`.
-- **Versioning:** Semantic Versioning (1.0.0 = self-hosting). The `stratac_version()` string
-  (in `src/stratac.strata`) is bumped in the same commit as the tag. Build each
-  release zip from a worktree of its tag so the binaries match the version.
-- **License:** GPL-3.0 on the compiler; runtime linking exception on `lib/` (games built
-  with Strata are yours); embedding exception on `libstrata` + `compiler/api/` (any engine
-  may embed it, `LICENSE-EMBEDDING.md`); a commercial license ($100, may go dynamic) lifts copyleft for
-  private compiler forks (enabled by the CLA). "Strata™" is a common-law trademark (no ®).
-- **Detection:** `.gitattributes` maps `.strata` (and the archived `.dmm`/`.hmm`) to C for GitHub highlighting.
+**Done this era (see CHANGELOG):** 1.0 self-hosting · 1.1 module system · 1.2 build system
+· 1.3 embedding API · 1.4 compiler 25–540× faster · 1.5 break/continue, incremental parallel
+builds, hardened limits.
 
----
+**Candidates, roughly in value order:**
+1. **Bundle tcc** for debug builds (near-instant; removes the gcc requirement for `run`).
+   gcc start-up (~150 ms per C file on Windows) is now most of a build.
+2. **Tagged unions + pattern matching** (the next big language feature; pairs with `switch`).
+3. **Commercial-engine integrations** (user: "later"): MSVC `.lib`, Unity / Unreal plugins;
+   Godot GDExtension (M6).
+4. `stratac watch` (keep the program in memory, rebuild on save) → an LSP later.
+5. Language sugar: qualified names, module constants/globals, default/named args.
+6. SoA / `#soa` arrays (M4), hot-reload runtime (M5).
+7. Housekeeping: bump `bootstrap.txt` (to ≥1.5.0) so the compiler's own code can use
+   `break`/`continue`/modules features; clean up the D--isms in `src/` (paren conditions,
+   `;`, `0 - 1`); delete `archive/` if the D-- path is no longer wanted (user's call).
 
-## 12. Gotchas (things that will bite you)
-
-- **The compiler's own code can only use what the pinned bootstrap release supports** (§9).
-- **Imports aren't transitive.** If a file uses something, it must import the module that
-  declares it (or an umbrella that `export import`s it). The error message says which.
-- **GUI examples block** (a window stays open until closed) — don't run them in an
-  automated/headless step; `stratac build` them instead.
-- **Line endings:** goldens are LF; the PowerShell test runner normalizes CRLF/LF.
-- **Strata strings are NUL-terminated C strings**, unlike D--'s (pointer, length) strings. A
-  string can't hold a `\0` byte, and `.len` is `strlen` (O(n)). The compiler avoids the
-  problem by keeping literal text as written (never decoding `\0`); keep it that way.
+**Open decisions for the user:** does `for i in 0..n` evaluate `n` once (Go/Rust) or each
+iteration (today)? · which of the candidates comes next.
 
 ---
 
-## 13. See also
-- [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) — compiler internals + build order.
-- [`website/design/DESIGN.md`](website/design/DESIGN.md) — language design & open decisions.
-- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each version.
-- [`Strata.md`](Strata.md) — the original founding plan and scope.
+## 13. Working notes (for whoever picks this up — human or agent)
+
+- **The bootstrap rule:** the compiler's own source may only use features of the release in
+  `bootstrap.txt`. To use a new feature in `src/`: release a version with it, bump the pin.
+- **Edit `compiler/src/*.strata` directly.** `src/strata_host.h` is compiled from the repo,
+  so new C helpers the compiler needs belong there (not in `lib/`, see §7).
+- **Keywords can't be identifiers** — e.g. `link`, `region`, `cast`, `sizeof`, `break`.
+- **Imports aren't transitive**; front-ends `import core`.
+- **Don't let a compiler overwrite its own running exe** (build into another path).
+- **Goldens are LF;** the test runner normalizes line endings. `emit` goldens change only
+  when codegen output legitimately changes — regenerate them deliberately.
+- **Shell tip (this Windows setup):** bash heredocs and inline Python strings mangle
+  backslashes (`'\\'` → `'\'`), which silently breaks Strata/C code. Write multi-line edits
+  with a file-based script or the editor tools.
+- **Deleting tracked directories** may be blocked by the permission system; move to
+  `archive/` with `git mv` and let the user delete.
+- **Measuring memory:** short runs (< 0.1 s) are too quick for a sampling memory probe;
+  judge by the larger benchmarks. The first run over freshly generated files is slowed by
+  Windows file scanning — re-run warm.
+- **GUI examples** open a window: build them in automation, don't run them.
+
+---
+
+## 14. Project facts
+
+- **Git:** solo, linear on `main`; every version tagged `vX.Y.Z` with a GitHub Release
+  carrying `strata-X.Y.Z-windows-x64.zip`. `.gitattributes` forces LF and maps `.strata`
+  to C for GitHub highlighting.
+- **Versioning:** SemVer; 1.0.0 = self-hosting; minor bumps are fine (the user: nobody
+  depends on it yet).
+- **Licensing:** GPL-3.0 compiler; runtime linking exception on `lib/` (programs built
+  with Strata are the author's); embedding exception on libstrata + `compiler/api/`;
+  commercial license ($100 intro) for private compiler modifications, enabled by the CLA.
+  Both exceptions are marked for legal review. "Strata™" is a common-law trademark.
