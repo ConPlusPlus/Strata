@@ -1,0 +1,1 @@
+export int twin() { return 2 }

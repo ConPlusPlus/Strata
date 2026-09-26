@@ -1,0 +1,3 @@
+// mods/uses_shapes.strata - imports shapes but does NOT re-export it.
+import mods.shapes
+export int double_area(Rect r) { return area(r) * 2 }

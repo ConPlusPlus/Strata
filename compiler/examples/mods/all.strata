@@ -1,0 +1,3 @@
+// mods/all.strata - an umbrella: whoever imports it sees shapes' and words' exports.
+export import mods.shapes
+export import mods.words

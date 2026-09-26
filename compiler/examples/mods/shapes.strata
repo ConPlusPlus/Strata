@@ -1,0 +1,16 @@
+// mods/shapes.strata - a module with a public API and private helpers.
+export struct Rect { int w; int h }
+export enum Kind { Square, Wide, Tall }
+
+// private: same name as a helper in mods/words.strata and in modules2.strata
+int helper(int x) { return x * 10 }
+
+struct Cache { int hits }          // private struct
+enum Secret { Hidden }             // private enum
+
+export int area(Rect r) { return helper(r.w) * r.h / 10 }
+export Kind kind_of(Rect r) {
+    if r.w == r.h { return Square }
+    if r.w > r.h { return Wide }
+    return Tall
+}

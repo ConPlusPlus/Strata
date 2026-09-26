@@ -7,6 +7,34 @@ and a GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [1.1.0] - 2026-09-26
+### Added
+- **`lib/crossplatform.h`**: a single-header platform layer (Windows / macOS / Linux),
+  starting with a Window section (create, poll events, title, size, close). Strata
+  programs just `import <crossplatform.h>`; C/C++ define `STRATA_CROSSPLATFORM` in one
+  file. Each section can be left out (`STRATA_CROSSPLATFORM_NO_WINDOW`). Example:
+  `examples/crossplatform.strata`.
+- **A real module system.** Every file is a module and its top-level declarations are
+  **private unless `export`ed**:
+  - `import gfx.Renderer` loads `gfx/Renderer.strata` from the project root (the main
+    file's folder) and makes its exports visible to that file. Imports are not
+    transitive.
+  - `export import X` re-exports a module; `core` is now such an umbrella.
+  - Private names can repeat across modules; colliding ones get module-prefixed C names
+    (`mods_shapes__helper`). Exported names must be unique.
+  - New errors: using a private declaration, using something from a module you didn't
+    import, clashing with an import, duplicate exports, a missing module, top-level
+    code in a module. Each error names the file and says how to fix it.
+  - Modules are now parsed file by file (new core module `modules`), so every error
+    points at the right file and line. The line-map workaround (`srcmap`) is gone.
+  - The compiler's own source now uses the system: 135 exports and explicit imports.
+- `stratac ast` shows `import` / `export` (`Import module X`, `export Func ...`).
+- Tests: `emit` goldens pin the generated C for every example. They replace the
+  `ast`/`check`/`emit` parity checks against the D-- seed (token parity stays).
+- Generated C now starts with `#define STRATA_PROGRAM 1`. A Strata program is always one
+  C file, so single-header C libraries can compile their implementation automatically
+  when they see it.
+
 ## [1.0.0] - 2026-09-24
 **Strata is self-hosted:** the compiler is written in Strata and compiles itself.
 ### Added

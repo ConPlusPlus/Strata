@@ -1,0 +1,2 @@
+modpriv.strata:3:9: error: 'Cache' is private to mods/shapes.strata (mark it 'export' to use it from another file)
+modpriv.strata:4:9: error: 'Hidden' is private to mods/shapes.strata (mark it 'export' to use it from another file)

@@ -12,6 +12,7 @@
 //   console <file.strata>
 
 // print_tokens / print_program (+ the core)
+import core   // the compiler (every phase, re-exported)
 import dump
 
 int dmm_main(string[dynamic] args) {

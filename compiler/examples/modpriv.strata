@@ -1,0 +1,5 @@
+// modpriv.strata - private structs and enum members aren't visible to importers.
+import mods.shapes
+var c = Cache{ 1 }
+var s = Hidden
+print(area(Rect{2, 2}))

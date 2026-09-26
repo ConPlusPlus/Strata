@@ -1,6 +1,6 @@
 # tests/run.ps1 - bootstrap the Strata compiler (build.ps1) and validate it:
 #   1. goldens: each stage's output vs its golden file, byte-for-byte (ARCHITECTURE.md sec 6)
-#   2. bootstrap parity: the self-hosted compiler vs the frozen D-- seed, every stage
+#   2. lexer parity: the self-hosted compiler vs the frozen D-- seed (tokens)
 # Run from anywhere:
 #     powershell -ExecutionPolicy Bypass -File compiler\tests\run.ps1
 #
@@ -48,13 +48,14 @@ Get-ChildItem -Path $here -Directory | ForEach-Object {
     }
 }
 
-# --- bootstrap parity: self-hosted compiler vs the frozen D-- seed -----------
-# While selfhost/ is still a faithful translation of src/, both compilers must agree
-# byte-for-byte on every stage, over every example and compiler source. Once the
-# Strata compiler deliberately gains something the seed lacks, drop the affected stage
-# here (the fixpoint check in build.ps1 is what must always hold).
+# --- lexer parity: self-hosted compiler vs the frozen D-- seed ----------------
+# The Strata compiler has deliberately diverged from the D-- seed (the module system:
+# parsing `import`/`export`, visibility, per-module errors), so ast/check/emit parity was
+# retired in favour of goldens (tests/emit/ pins the generated C). The lexer hasn't
+# changed, so token output must still match the seed on every example and compiler
+# source. The fixpoint check in build.ps1 is what must always hold.
 $inputs = @(Get-ChildItem $examples -Filter *.strata) + @(Get-ChildItem $selfhost -Filter *.strata) + @(Get-ChildItem $src -Include *.dmm,*.hmm -Recurse)
-foreach ($stage in @("tokens", "ast", "check", "emit")) {
+foreach ($stage in @("tokens")) {
     $bad = @()
     foreach ($f in $inputs) {
         $want = (& $stage0 $stage $f.FullName) -join "`n"

@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
+// selfhost/modules.strata - the module loader. Part of the compiler CORE.
+//
+// Every .strata file is a module. `load_program(path)` parses the root file and, one file
+// at a time, every module it imports (recursively, each file once), and returns one
+// Program: all their declarations (each tagged with its module), the root file's
+// top-level code, and the module table (who imports whom). The checker then enforces
+// visibility from that table: a file sees its own declarations plus the `export`ed ones
+// of the modules it imports (and of modules those re-export with `export import`).
+//
+// Module names are resolved from the PROJECT ROOT (the main file's folder), so a name
+// means the same file everywhere: `import gfx.Renderer` is <root>/gfx/Renderer.strata
+// whichever file imports it.
+//
+// Declaration order matches the old paste-based loader: an imported module's declarations
+// appear where its `import` is, so generated C is unchanged.
+
+import token
+import lexer
+import ast
+import parser
+
+// ---- paths ---------------------------------------------------------------
+
+export string stem_of(string p) {
+    int dot = 0 - 1
+    int slash = 0 - 1
+    for i in 0..p.len {
+        if p[i] == '.' { dot = i }
+        if p[i] == '/' || p[i] == '\\' { slash = i }
+    }
+    if dot >= 0 && (slash < 0 || dot > slash) { return substr(p, 0, dot) }
+    return p
+}
+
+export string basename_of(string p) {
+    int slash = 0 - 1
+    for i in 0..p.len { if p[i] == '/' || p[i] == '\\' { slash = i } }
+    return substr(p, slash + 1, p.len - (slash + 1))
+}
+
+export string dirname_of(string p) {
+    int slash = 0 - 1
+    for i in 0..p.len { if p[i] == '/' || p[i] == '\\' { slash = i } }
+    if slash < 0 { return "." }
+    return substr(p, 0, slash)
+}
+
+// `gfx.Renderer` -> `gfx/Renderer.strata` (relative to the project root)
+string module_rel_path(string name) {
+    string rel = ""
+    for i in 0..name.len {
+        if name[i] == '.' { rel = rel + "/" } else { rel = rel + substr(name, i, 1) }
+    }
+    return rel + ".strata"
+}
+
+// ---- loading -------------------------------------------------------------
+
+export struct LoadResult { Program prog; bool ok }
+
+struct Loader { Program prog; bool had_error; string root }   // root: the project root folder
+
+void ld_error(Loader* ld, string file, int line, int col, string msg) {
+    ld.had_error = true
+    print(file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg)
+}
+
+int ld_find(Loader* ld, string path) {
+    for i in 0..ld.prog.modules.len { if ld.prog.modules[i].path == path { return i } }
+    return 0 - 1
+}
+
+// Load the module at `path` (once) and everything it imports; returns its index.
+// `file` is how diagnostics name it (its path from the project root).
+int ld_module(Loader* ld, string path, string file, string name, bool is_root) {
+    int existing = ld_find(ld, path)
+    if existing >= 0 { return existing }
+
+    int idx = ld.prog.modules.len
+    ld.prog.modules.push(new_module(name, path, file))   // registered first, so cycles terminate
+
+    Parser p = new_parser(lex(read_file(path)))
+    Program part = parse_program(&p)
+    if p.had_error {
+        print(file + ":" + int_to_str(p.err_line) + ":" + int_to_str(p.err_col) + ": parse error: " + p.err_msg)
+        ld.had_error = true
+        return idx
+    }
+
+    if is_root {
+        ld.prog.main = part.main
+    } else if part.main.len > 0 {
+        Stmt* s = part.main[0]
+        ld_error(ld, file, s.line, s.col, "a module can only contain declarations; top-level code is only allowed in the main file")
+    }
+
+    for i in 0..part.decls.len {
+        Decl* d = part.decls[i]
+        d.module = idx
+        if d.kind == DcImport {
+            string rel = module_rel_path(d.path)
+            string mpath = ld.root + "/" + rel
+            if read_file(mpath).len == 0 {
+                ld_error(ld, file, d.line, d.col, "cannot find module '" + d.path + "' (looked for " + rel + " in the project folder)")
+            } else {
+                int m = ld_module(ld, mpath, rel, d.path, false)
+                ld.prog.modules[idx].imports.push(m)
+                if d.is_exported { ld.prog.modules[idx].reexports.push(m) }
+            }
+        } else {
+            ld.prog.decls.push(d)
+        }
+    }
+    return idx
+}
+
+// Load a program rooted at `path`. Errors are printed as they are found; `ok` is false
+// if there were any (parse errors, missing modules, code in a module).
+export LoadResult load_program(string path) {
+    Decl*[dynamic]  decls = []
+    Stmt*[dynamic]  main  = []
+    Module[dynamic] mods  = []
+    Loader ld = Loader{ Program{ decls, main, mods }, false, dirname_of(path) }
+    ld_module(&ld, path, basename_of(path), stem_of(basename_of(path)), true)
+    return LoadResult{ ld.prog, !ld.had_error }
+}

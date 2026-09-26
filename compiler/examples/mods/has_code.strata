@@ -1,0 +1,2 @@
+export int f() { return 1 }
+print("modules can't run code")

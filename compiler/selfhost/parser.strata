@@ -20,8 +20,9 @@
 import lexer
 // the AST node types + new_* constructors
 import ast
+import token
 
-struct Parser {
+export struct Parser {
     Token[dynamic] toks
     int     pos
     bool    had_error
@@ -32,7 +33,7 @@ struct Parser {
     string     err_msg
 }
 
-Parser new_parser(Token[dynamic] toks) { return Parser{ toks, 0, false, false, 0, 0, "" }; }
+export Parser new_parser(Token[dynamic] toks) { return Parser{ toks, 0, false, false, 0, 0, "" }; }
 
 // ---- cursor ------------------------------------------------------------
 
@@ -149,10 +150,19 @@ bool looks_like_func(Parser* p) {
 // ---- declarations ------------------------------------------------------
 
 // `import "header.h"` or `import <header.h>` - a C header to #include (interop).
+// `import gfx.Renderer` - a Strata module (path "gfx.Renderer"; the loader finds the file).
 Decl* import_decl(Parser* p) {
     Token kw = p_expect(p, TkKwImport)
     Decl* d = new_decl(DcInclude, kw.line, kw.col)
-    if (p_check(p, TkString)) {
+    if (p_check(p, TkIdent)) {
+        d.kind = DcImport
+        string path = p_advance(p).text
+        while (p_check(p, TkDot)) {
+            p_advance(p)
+            path = path + "." + p_expect(p, TkIdent).text
+        }
+        d.path = path
+    } else if (p_check(p, TkString)) {
         d.path = p_advance(p).text
         d.is_system = false
     } else if (p_check(p, TkLt)) {
@@ -232,7 +242,7 @@ Decl* func_decl(Parser* p) {
 
 // ---- program -----------------------------------------------------------
 
-Program parse_program(Parser* p) {
+export Program parse_program(Parser* p) {
     Decl*[dynamic] decls = []
     Stmt*[dynamic] main  = []
     skip_newlines(p)
@@ -242,6 +252,13 @@ Program parse_program(Parser* p) {
         if (p_check(p, TkKwStruct))     { Decl* d = struct_decl(p); d.is_exported = exported; decls.push(d); }
         else if (p_check(p, TkKwEnum))  { Decl* d = enum_decl(p);   d.is_exported = exported; decls.push(d); }
         else if (looks_like_func(p))    { Decl* d = func_decl(p);   d.is_exported = exported; decls.push(d); }
+        else if (exported && p_check(p, TkKwImport)) {
+            // `export import Name` re-exports a module (C headers can't be re-exported)
+            Decl* d = import_decl(p)
+            if (d.kind != DcImport) { p_error(p, p_prev(p), "only a Strata module can be re-exported ('export import Name')"); }
+            d.is_exported = true
+            decls.push(d)
+        }
         else if (exported)              { p_error(p, p_peek(p), "'export' must precede a declaration"); p_advance(p); }
         else if (p_check(p, TkKwImport)) { decls.push(import_decl(p)); }
         else if (p_check(p, TkKwLink))  { decls.push(link_decl(p)); }
@@ -252,7 +269,8 @@ Program parse_program(Parser* p) {
         }
         skip_newlines(p)
     }
-    return Program{ decls, main }
+    Module[dynamic] mods = []
+    return Program{ decls, main, mods }
 }
 
 // ---- statements --------------------------------------------------------

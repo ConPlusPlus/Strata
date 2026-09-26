@@ -226,7 +226,8 @@ deepen each phase — don't perfect the lexer before you've ever emitted C.
 11. ✅ **Prelude + modules.** Prelude helpers (`min`/`max`/`clamp`/`lerp`/`PI`,
     `lib/sprelude.h`). **Modules:** `import Name` pastes `Name.strata` (dotted paths →
     folders; deduplicated, recursive) — the driver's module preprocessor mirrors D--'s
-    `#include`. `export` marks decls public (intent; enforcement later). Golden-tested
+    `#include`. `export` marks decls public (intent; enforcement later). *(Superseded
+    after 1.0.0 by a real module system; see HANDOFF.md §5.)* Golden-tested
     (`run/prelude`, `run/modules`). **With multi-file + switch + arrays, Strata can now
     express a compiler — self-hosting is unblocked.** *Next: port a module (e.g. the lexer)
     to Strata, or tagged unions / SoA.*

@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 1.0.0 (self-hosted)** · tests: **22/22** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 1.1.0** · tests: **44/44** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -37,7 +37,7 @@ language (in `C:\DMinusMinus`); the D-- version (`compiler/src/`) is kept as the
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.0.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.1.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -129,7 +129,8 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 | `codegen.dmm` | typed AST → C. Reads `rtype` for operator overloading (`vec3_add`, `.`/`->`, etc.) |
 | `core.dmm` | umbrella `#include` = the whole compiler CORE, **no `main`** (the "library") |
 | `dump.dmm` | renders tokens/AST to text (front-end utility) |
-| `stratac.dmm` | front-end #1: the CLI + orchestration (module resolution, gcc invocation) |
+| `modules` | the module loader: parses each file, builds the module table (Strata compiler only; the D-- seed pastes text) |
+| `stratac.dmm` | front-end #1: the CLI + orchestration (gcc invocation) |
 | `console.dmm` | front-end #2: a tokens+AST explorer (proves the core is reusable) |
 
 **Key ideas:**
@@ -140,8 +141,12 @@ Each phase is one file in `compiler/src/`, communicating only through data struc
 - **`Expr.rtype`** — the checker annotates every expression with its resolved type. Codegen
   uses this to pick the right C (e.g. `a + b` → `vec3_add(a,b)` when `a` is a vec3, `.` vs
   `->` for field access, `sizeof` for `alloc`, element casts for dynamic arrays).
-- **Module resolution** lives in `stratac.dmm` (`resolve_modules`): `import Name` pastes
-  `Name.strata` (deduplicated, recursive) before lexing — mirrors D--'s `#include`.
+- **Modules** (`selfhost/modules.strata`): `load_program` parses the root file and each
+  imported module *separately* (each file once), tags every declaration with its module,
+  and builds the module table. The checker enforces visibility from that table and gives
+  colliding private names module-prefixed C names. (The frozen D-- seed still uses the old
+  paste-the-text preprocessor in `src/stratac.dmm`; it ignores `export`, which is why it
+  can still bootstrap the Strata compiler.)
 
 ---
 
@@ -193,8 +198,13 @@ else is a checker error) and `sizeof(T)` (an `int`). Both are keywords.
 **C interop:** `import <raylib.h>` / `import "foo.h"` (emit `#include`), `link "raylib"`
 (add `-lraylib`), then call C functions and reference C constants directly.
 
-**Modules:** `import Name` pulls in `Name.strata` (dotted → folders); `export` marks a decl
-public (currently advisory — not yet enforced).
+**Modules:** every file is a module; top-level declarations are **private** unless marked
+`export`. `import gfx.Renderer` loads `<project root>/gfx/Renderer.strata` (the root is
+the main file's folder) and makes its exports visible to *this* file only (imports aren't
+transitive). `export import X` re-exports X (umbrella modules, like `core`). Private names
+may repeat across modules (they get module-prefixed C names); exported names must be
+unique. Modules may contain only declarations. Tests: `examples/modules2.strata` +
+`examples/mods/`, and the error goldens `check/modvis`, `check/modload`, `check/modpriv`.
 
 **Designed but NOT yet implemented:** expression-bodied functions (`f(x) = expr`), default
 & named arguments, region-escape safety checking.
@@ -203,19 +213,16 @@ public (currently advisory — not yet enforced).
 
 ## 6. Tests
 
-`run.ps1` runs **22 checks**:
+`run.ps1` runs **44 checks**:
 1. **bootstrap**: runs `build.ps1` (stage0 → stage1 → stage2 + the fixpoint check).
-2. **17 goldens** in `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
-   against `bin/stratac.exe <stage> examples/<name>.strata` (stages `tokens`, `ast`,
-   `check`, `run`), using the self-hosted compiler.
-3. **4 parity checks** (`tokens`, `ast`, `check`, `emit`): the self-hosted compiler and the
-   D-- seed must produce identical output over 40 files (examples, `selfhost/`, `src/`).
-   This holds only while `selfhost/` does nothing the seed can't. Once the compiler
-   deliberately gains a feature, drop the affected parity stage. The fixpoint must
-   always hold.
-GUI examples
-(`window`, `sprite`, `balls`) are built in the packaging step but not golden-run (they open
-windows). Add a golden by dropping the expected output in the right `tests/<stage>/` folder.
+2. **goldens**: `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
+   against `bin/stratac.exe <stage> examples/<name>.strata`, using the self-hosted
+   compiler. Stages: `tokens`, `ast`, `check`, `run`, and `emit`. The `emit` goldens pin
+   the generated C for every example, which is what replaced the old D-- parity checks.
+   Add a test by dropping a `.expected` file in the right folder.
+3. **lexer parity**: token output must still match the D-- seed on every example and
+   compiler source. The `ast`/`check`/`emit` parity checks were retired when the module
+   system made the compiler deliberately diverge from the seed.
 
 ---
 
@@ -232,6 +239,7 @@ Header-only C the *compiled program* links against (not the compiler). Carries t
 | `sio.h` | `read_file`, `write_file`, `args()` |
 | `sarr.h` | the type-erased dynamic array (`Array`) |
 | `sprelude.h` | prelude helpers (`sp_min`/`max`/`clamp`/`lerp`, `SP_PI`) |
+| `crossplatform.h` | platform layer (window, ...), single-header; auto-implemented in Strata programs via `STRATA_PROGRAM`. See its top comment for adding sections |
 
 ---
 
@@ -281,7 +289,8 @@ Watch performance if the compiler starts building very large strings.
 - **M5: hot-reload runtime** — DLL + host + persistent arena (the Handmade/Jai pattern).
 - **M6: Godot GDExtension target.**
 - Smaller: a bundled **tcc** for zero-dependency `stratac run`; the designed-but-unbuilt
-  sugars (expression-bodied functions, default/named args); `export` enforcement.
+  sugars (expression-bodied functions, default/named args); qualified names (`shapes.area`)
+  to disambiguate imports; module-level constants.
 
 ---
 
@@ -308,9 +317,10 @@ Watch performance if the compiler starts building very large strings.
   `fn`, `auto`, `str`, `new`, `cast`, `sizeof`, `global`, `switch`, `region`. (A local named
   `fn` once caused a silent parse failure.) D-- parse errors are silent (exit 1, no message)
   — bisect by feeding prefixes to `dec ast`.
-- **Modules are concatenated**, so a module file with top-level *code* (not just
-  declarations) would run as part of `main`. Keep modules declaration-only.
-- **`export` is not enforced yet** — it parses but doesn't hide symbols.
+- **Imports aren't transitive.** If a file uses something, it must import the module that
+  declares it (or an umbrella that `export import`s it). The error message says which.
+- **The D-- seed pastes modules** and ignores `export`, so the compiler's own source must
+  stay valid under *both* rules (it does: seed builds stage1, which enforces them).
 - **GUI examples block** (a window stays open until closed) — don't run them in an
   automated/headless step; `stratac build` them instead.
 - **Line endings:** goldens are LF; the PowerShell test runner normalizes CRLF/LF.

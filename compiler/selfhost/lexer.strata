@@ -275,7 +275,7 @@ bool ends_statement(TokKind k) {
     return false
 }
 
-Token[dynamic] lex(string src) {
+export Token[dynamic] lex(string src) {
     Token[dynamic] tokens = []
     Lexer lx = Lexer{ src, 0, 1, 1, 0, 1, 1, false, false }
     TokKind last = TkError
@@ -313,7 +313,7 @@ Token[dynamic] lex(string src) {
 
 // kind_name = the printable name of a token kind, used by the `tokens` dump and
 // (later) by parser error messages.
-string kind_name(TokKind k) {
+export string kind_name(TokKind k) {
     switch (k) {
         case TkIdent:     return "Ident"
         case TkInt:       return "Int"

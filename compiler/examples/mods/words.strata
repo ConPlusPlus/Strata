@@ -1,0 +1,3 @@
+// mods/words.strata - another module with its own private `helper`.
+string helper(string s) { return "<" + s + ">" }
+export string tag(string s) { return helper(s) }

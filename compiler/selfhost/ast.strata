@@ -11,15 +11,14 @@
 //   * `..` ranges are ExBinary with op "..";
 //   * Program carries top-level statements (`main`) as well as decls, because
 //     top-level code = the entry point (DESIGN sec 2).
-
-// diagnostics map combined-source lines back to files
-import srcmap
+//   * modules: every Decl records which module (file) it came from; Program lists the
+//     modules and who imports whom, for the checker's visibility rules.
 
 // ---- types -------------------------------------------------------------
 
-enum TypeKind { TyNamed, TyArray, TyFixedArray, TyPointer, TyDynArray }
+export enum TypeKind { TyNamed, TyArray, TyFixedArray, TyPointer, TyDynArray }
 
-struct TypeNode {
+export struct TypeNode {
     TypeKind  kind
     string       name// TyNamed: "int", "vec3", "Entity", ...
     TypeNode* elem// element type (Array / FixedArray / Pointer)
@@ -28,20 +27,20 @@ struct TypeNode {
     int       col
 }
 
-TypeNode* new_type(TypeKind k, int line, int col) {
+export TypeNode* new_type(TypeKind k, int line, int col) {
     return alloc(TypeNode{ k, "", null, "", line, col })
 }
 
 // ---- expressions -------------------------------------------------------
 
-enum ExprKind {
+export enum ExprKind {
     ExIntLit, ExFloatLit, ExStringLit, ExCharLit, ExBoolLit,
     ExName, ExUnary, ExBinary, ExCall, ExField, ExIndex,
     ExArrayLit, ExStructLit,
     ExCast, ExSizeof
 }
 
-struct Expr {
+export struct Expr {
     ExprKind  kind
     int       line
     int       col
@@ -56,19 +55,19 @@ struct Expr {
     TypeNode* rtype// resolved type, filled by the checker (null until then)
 }
 
-Expr* new_expr(ExprKind k, int line, int col) {
+export Expr* new_expr(ExprKind k, int line, int col) {
     Expr*[dynamic] items = []
     return alloc(Expr{ k, line, col, "", "", "", false, null, null, items, null, null })
 }
 
 // ---- statements --------------------------------------------------------
 
-enum StmtKind {
+export enum StmtKind {
     StBlock, StVar, StReturn, StExprStmt, StAssign,
     StIf, StWhile, StForIn, StRegion, StSwitch
 }
 
-struct SwitchCase {
+export struct SwitchCase {
     Expr*[dynamic] values// case values; empty => `default`
     Stmt*   body// a StBlock of the case's statements
     bool    is_default
@@ -76,7 +75,7 @@ struct SwitchCase {
     int     col
 }
 
-struct Stmt {
+export struct Stmt {
     StmtKind kind
     int      line
     int      col
@@ -107,7 +106,7 @@ struct Stmt {
     SwitchCase[dynamic] cases
 }
 
-Stmt* new_stmt(StmtKind k, int line, int col) {
+export Stmt* new_stmt(StmtKind k, int line, int col) {
     Stmt*[dynamic]      stmts = []
     SwitchCase[dynamic] cases = []
     return alloc(Stmt{
@@ -126,12 +125,12 @@ Stmt* new_stmt(StmtKind k, int line, int col) {
 
 // ---- declarations ------------------------------------------------------
 
-enum DeclKind { DcFunc, DcStruct, DcEnum, DcInclude, DcLink }
+export enum DeclKind { DcFunc, DcStruct, DcEnum, DcInclude, DcLink, DcImport }
 
-struct Param    { string name; TypeNode* type; }
-struct FieldDef { string name; TypeNode* type; }
+export struct Param    { string name; TypeNode* type; }
+export struct FieldDef { string name; TypeNode* type; }
 
-struct Decl {
+export struct Decl {
     DeclKind kind
     int      line
     int      col
@@ -145,13 +144,15 @@ struct Decl {
     // DcEnum
     string[dynamic]      members
     // DcInclude (C interop: `import "header.h"` / `import <header.h>`)
+    // DcImport  (Strata module: `import gfx.Renderer` -> path "gfx.Renderer")
     string        path
     bool       is_system
-    // module system: was this decl `export`ed?
+    // module system: was this decl `export`ed? (on a DcImport: a re-export)
     bool       is_exported
+    int        module// index into Program.modules of the file it was declared in
 }
 
-Decl* new_decl(DeclKind k, int line, int col) {
+export Decl* new_decl(DeclKind k, int line, int col) {
     Param[dynamic]    params  = []
     FieldDef[dynamic] fields  = []
     string[dynamic]      members = []
@@ -162,10 +163,30 @@ Decl* new_decl(DeclKind k, int line, int col) {
         fields,                  // fields
         members,                 // members
         "", false,               // path, is_system
-        false                    // is_exported
+        false,                   // is_exported
+        0                        // module
     })
 }
 
-// Program = the top-level decls (struct/enum/func) plus the top-level statement
-// sequence that becomes the implicit `main`.
-struct Program { Decl*[dynamic] decls; Stmt*[dynamic] main; }
+// A module = one source file. `imports` are the modules it imports directly;
+// `reexports` the subset it imports with `export import` (passed on to its importers);
+// `visible` is filled in by the checker: every module whose exports this one can see.
+export struct Module {
+    string          name// module name as imported ("gfx.Renderer"); the root: its file stem
+    string          path// file path
+    string          file// file name, for diagnostics
+    int[dynamic]    imports
+    int[dynamic]    reexports
+    int[dynamic]    visible
+}
+
+// Program = the top-level decls (struct/enum/func) of every module, the top-level
+// statement sequence of the root file (the implicit `main`), and the module table.
+export struct Program { Decl*[dynamic] decls; Stmt*[dynamic] main; Module[dynamic] modules; }
+
+export Module new_module(string name, string path, string file) {
+    int[dynamic] a = []
+    int[dynamic] b = []
+    int[dynamic] v = []
+    return Module{ name, path, file, a, b, v }
+}

@@ -29,7 +29,7 @@ void print_token(Token t) {
     else                      { print(loc + "  " + name); }
 }
 
-void print_tokens(Token[dynamic] toks) {
+export void print_tokens(Token[dynamic] toks) {
     for i in 0..toks.len { print_token(toks[i]); }
 }
 
@@ -131,10 +131,12 @@ void pr_stmt(int ind, Stmt* s) {
 }
 
 void pr_decl(Decl* d) {
+    string ex = ""
+    if (d.is_exported) { ex = "export "; }
     switch (d.kind) {
         case DcFunc:
             {
-                string head = "Func " + ast_type_str(d.ret) + " " + d.name + "("
+                string head = ex + "Func " + ast_type_str(d.ret) + " " + d.name + "("
                 for i in 0..d.params.len {
                     if (i > 0) { head = head + ", "; }
                     head = head + ast_type_str(d.params[i].type) + " " + d.params[i].name
@@ -144,21 +146,23 @@ void pr_decl(Decl* d) {
                 pr_stmt(1, d.body)
             }
         case DcEnum:
-            pr(0, "Enum " + d.name)
+            pr(0, ex + "Enum " + d.name)
             for i in 0..d.members.len { pr(1, d.members[i]); }
         case DcStruct:
-            pr(0, "Struct " + d.name)
+            pr(0, ex + "Struct " + d.name)
             for i in 0..d.fields.len { pr(1, ast_type_str(d.fields[i].type) + " " + d.fields[i].name); }
         case DcInclude:
             if (d.is_system) { pr(0, "Import <" + d.path + ">"); } else { pr(0, "Import \"" + d.path + "\""); }
         case DcLink:
             pr(0, "Link \"" + d.path + "\"")
+        case DcImport:
+            if (d.is_exported) { pr(0, "Import module " + d.path + " (re-exported)"); } else { pr(0, "Import module " + d.path); }
         default:
             pr(0, "?decl")
     }
 }
 
-void print_program(Program prog) {
+export void print_program(Program prog) {
     for i in 0..prog.decls.len { pr_decl(prog.decls[i]); }
     if (prog.main.len > 0) {
         pr(0, "Main")

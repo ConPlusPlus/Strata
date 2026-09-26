@@ -1,0 +1,4 @@
+mods/twin_b.strata:1:8: error: 'twin' is also exported by mods/twin_a.strata (exported names must be unique across the program)
+modvis.strata:9:1: error: 'tag' conflicts with the 'tag' exported by mods/words.strata, which this file imports
+modvis.strata:7:19: error: 'Rect' is declared in mods/shapes.strata, which this file doesn't import (add 'import mods.shapes')
+modvis.strata:8:7: error: 'helper' is private to mods/words.strata (mark it 'export' to use it from another file)

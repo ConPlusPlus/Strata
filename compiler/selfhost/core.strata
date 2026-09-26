@@ -9,7 +9,11 @@
 // core main-free and front-end-agnostic is what lets the same code ship as an exe, a
 // DLL, or a language server without a rewrite (ARCHITECTURE.md sec 11).
 //
-// AST -> validated/inferred (brings ast.hmm)
-import checker
-// brings parser.dmm -> lexer.dmm -> ast.hmm -> token.hmm (dedup'd)
-import codegen
+// The core re-exports every phase, so a front-end just imports `core`.
+export import token
+export import lexer
+export import ast
+export import parser
+export import modules
+export import checker
+export import codegen

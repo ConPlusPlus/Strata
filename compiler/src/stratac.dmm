@@ -70,6 +70,11 @@ bool mod_seen(ModPP* pp, str path) {
 str parse_module_import(str line) {
     int i = 0;
     while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
+    // `export import Name` (a re-export) pastes the same as `import Name` here
+    if (i + 7 <= line.len && substr(line, i, 7) == "export ") {
+        i = i + 7;
+        while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
+    }
     str kw = "import";
     if (i + kw.len > line.len) { return ""; }
     if (substr(line, i, kw.len) != kw) { return ""; }

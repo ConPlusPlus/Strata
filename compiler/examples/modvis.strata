@@ -1,0 +1,9 @@
+// modvis.strata - module visibility errors (checked by tests/check/modvis.expected).
+import mods.uses_shapes     // not transitive: shapes' exports are NOT visible here
+import mods.twin_a
+import mods.twin_b          // twin_a and twin_b both export `twin`
+import mods.words
+
+print(double_area(Rect{ 1, 2 }))   // Rect: shapes isn't imported by this file
+print(helper("x"))                 // words' helper is private
+int tag(string s) { return 0 }     // clashes with words' exported `tag`

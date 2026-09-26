@@ -1,0 +1,12 @@
+export Func string greet(string name)
+  Block
+    Return
+      Binary +
+        String "hello, "
+        Name name
+export Func int add(int a, int b)
+  Block
+    Return
+      Binary +
+        Name a
+        Name b

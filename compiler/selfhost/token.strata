@@ -16,7 +16,7 @@
 // Only keywords/operators for features that are DESIGNED are included. Undecided ones
 // (match/switch, foreign, defer, null, import, #soa ...) are added when their feature is.
 
-enum TokKind {
+export enum TokKind {
     TkIdent, TkInt, TkFloat, TkString, TkChar,
     TkKwVar, TkKwConst, TkKwStruct, TkKwEnum,
     TkKwIf, TkKwElse, TkKwWhile, TkKwFor, TkKwIn, TkKwReturn,
@@ -35,7 +35,7 @@ enum TokKind {
     TkEof, TkError
 }
 
-struct Token {
+export struct Token {
     TokKind kind
     string     text// source lexeme (Ident/Int/Float) or decoded value (String/Char)
     int     line

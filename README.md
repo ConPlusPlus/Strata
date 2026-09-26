@@ -38,7 +38,8 @@ for i in 0..60 {
 - ✅ strings, and **C interop** (`import` a header, `link` a library, call C directly)
 - ✅ **dynamic arrays** (`T[dynamic]`: literals, `push`, `len`, indexing, `for x in xs`) — entity lists
 - ✅ **enums + `switch`** (multi-value cases, no fall-through) — state machines
-- ✅ **modules** (`import Name` to pull in another `.strata` file; `export` to mark public)
+- ✅ **modules**: every file is a module, private by default; `export` to publish, `import gfx.Renderer`
+  to use, `export import` to re-export
 - ✅ a small **prelude** (`min`/`max`/`clamp`/`lerp`/`PI`)
 - ✅ `alloc(value)` + `null` — heap-allocated node graphs (e.g. an AST)
 - ✅ **games written in Strata** — a raylib window ([`window.strata`](compiler/examples/window.strata))

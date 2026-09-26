@@ -1,0 +1,3 @@
+// modload.strata - module loading errors (checked by tests/check/modload.expected).
+import mods.has_code
+import mods.nope

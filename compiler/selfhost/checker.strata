@@ -84,21 +84,29 @@ TypeNode* type_to_node(Type* t) {
 struct VarInfo   { string name; Type* type; bool is_const; }
 struct Scope     { VarInfo[dynamic] vars; Scope* parent; }
 struct FieldInfo { string name; Type* type; }
-struct StructInfo{ string name; FieldInfo[dynamic] fields; }
-struct FuncInfo  { string name; Type*[dynamic] params; Type* ret; }
-struct EnumMember{ string member; string enum_name; }
+// Top-level declarations. Each records its module, whether it is exported, and its
+// C name: the source name, unless a private name is declared in more than one module,
+// in which case the private ones become `<module>__<name>` so they can't collide in C.
+struct StructInfo{ string name; FieldInfo[dynamic] fields; int module; bool exported; string cname; }
+struct FuncInfo  { string name; Type*[dynamic] params; Type* ret; int module; bool exported; string cname; }
+struct EnumInfo  { string name; int module; bool exported; string cname; }
+struct EnumMember{ string member; string enum_name; int module; bool exported; string cname; }   // enum_name: the enum's C name
+// One entry per top-level name (all kinds), for the module-level name checks.
+struct NameEntry { string name; int module; bool exported; int line; int col; }
 
-struct Checker {
+export struct Checker {
     string          file
     bool         had_error
     bool         has_foreign// did the program `import` a C header? (enables external calls)
     StructInfo[dynamic] structs
     FuncInfo[dynamic]   funcs
-    string[dynamic]        enums
+    EnumInfo[dynamic]   enums
     EnumMember[dynamic] enum_members
     Scope*       scope
     Type*        cur_ret
-    SrcMap*      map// module line map (null => lines are file lines)
+    Module[dynamic]    mods// the program's modules (see modules.strata)
+    int          cur// module whose code is being checked
+    NameEntry[dynamic] names
 }
 
 struct LookupResult { bool found; Type* type; bool is_const; }
@@ -106,28 +114,92 @@ struct LvalueResult { bool ok; bool is_const; }
 
 void ck_error(Checker* c, int line, int col, string msg) {
     c.had_error = true
-    print(src_loc(c.map, c.file, line, col) + ": error: " + msg)
+    string file = c.file
+    if c.cur >= 0 && c.cur < c.mods.len { file = c.mods[c.cur].file }
+    print(file + ":" + int_to_str(line) + ":" + int_to_str(col) + ": error: " + msg)
+}
+
+// ---- modules + visibility ------------------------------------------------
+
+// Can the module being checked see a declaration from module `owner`?
+// Its own, always; another module's, only if exported and that module is visible.
+bool ck_sees(Checker* c, int owner, bool exported) {
+    if owner == c.cur { return true }
+    if !exported { return false }
+    Module m = c.mods[c.cur]
+    for i in 0..m.visible.len { if m.visible[i] == owner { return true } }
+    return false
+}
+
+// Module m can see v's exports, and (through `export import`) whatever v re-exports.
+void ck_add_visible(Checker* c, int m, int v) {
+    if v == m { return }
+    for i in 0..c.mods[m].visible.len { if c.mods[m].visible[i] == v { return } }
+    c.mods[m].visible.push(v)
+    for i in 0..c.mods[v].reexports.len { ck_add_visible(c, m, c.mods[v].reexports[i]) }
+}
+
+void ck_visibility(Checker* c) {
+    for m in 0..c.mods.len {
+        for i in 0..c.mods[m].imports.len { ck_add_visible(c, m, c.mods[m].imports[i]) }
+    }
+}
+
+// If `name` is a top-level declaration the current module can't see, explain why;
+// "" if no module declares it (so the caller reports its usual "unknown ..." error).
+string ck_hidden(Checker* c, string name) {
+    // several modules may declare it; explain the most likely intended one:
+    // private in a module this file imports > exported by one it doesn't > anything else
+    int owner = 0 - 1
+    bool exported = false
+    int best = 0
+    for i in 0..c.names.len {
+        NameEntry n = c.names[i]
+        if n.name == name && n.module != c.cur {
+            int score = 1
+            if !n.exported && ck_sees(c, n.module, true) { score = 3 }
+            else if n.exported { score = 2 }
+            if score > best { best = score; owner = n.module; exported = n.exported }
+        }
+    }
+    if owner < 0 { return "" }
+    string f = c.mods[owner].file
+    if !exported { return "'" + name + "' is private to " + f + " (mark it 'export' to use it from another file)" }
+    return "'" + name + "' is declared in " + f + ", which this file doesn't import (add 'import " + c.mods[owner].name + "')"
 }
 
 // ---- table helpers -----------------------------------------------------
+// Lookups by SOURCE name respect visibility; lookups by C name (from a resolved Type)
+// don't need to.
 
 int ck_struct_index(Checker* c, string name) {
-    for i in 0..c.structs.len { if (c.structs[i].name == name) { return i; } }
+    for i in 0..c.structs.len {
+        if c.structs[i].name == name && ck_sees(c, c.structs[i].module, c.structs[i].exported) { return i }
+    }
+    return 0 - 1
+}
+int ck_struct_by_cname(Checker* c, string cname) {
+    for i in 0..c.structs.len { if c.structs[i].cname == cname { return i } }
     return 0 - 1
 }
 int ck_func_index(Checker* c, string name) {
-    for i in 0..c.funcs.len { if (c.funcs[i].name == name) { return i; } }
+    for i in 0..c.funcs.len {
+        if c.funcs[i].name == name && ck_sees(c, c.funcs[i].module, c.funcs[i].exported) { return i }
+    }
     return 0 - 1
 }
-bool ck_enum_has(Checker* c, string name) {
-    for i in 0..c.enums.len { if (c.enums[i] == name) { return true; } }
-    return false
-}
-string ck_enum_member(Checker* c, string name) {
-    for i in 0..c.enum_members.len {
-        if (c.enum_members[i].member == name) { return c.enum_members[i].enum_name; }
+int ck_enum_index(Checker* c, string name) {
+    for i in 0..c.enums.len {
+        if c.enums[i].name == name && ck_sees(c, c.enums[i].module, c.enums[i].exported) { return i }
     }
-    return ""
+    return 0 - 1
+}
+int ck_member_index(Checker* c, string name) {
+    for i in 0..c.enum_members.len {
+        EnumMember m = c.enum_members[i]
+        if m.member == name && ck_sees(c, m.module, m.exported) { return i }
+    }
+    return 0 - 1
 }
 
 // ---- types -------------------------------------------------------------
@@ -177,9 +249,14 @@ Type* ck_type(Checker* c, TypeNode* t) {
     if (t.kind == TyPointer) { return ty_ptr(ck_type(c, t.elem)); }
     Type* p = ck_prim(t.name)
     if (p != null) { return p; }
-    if (ck_struct_index(c, t.name) >= 0) { return ty(TcStruct, t.name); }
-    if (ck_enum_has(c, t.name)) { return ty(TcInt, t.name); }
-    ck_error(c, t.line, t.col, "unknown type '" + t.name + "'")
+    // a user type: resolve it, and give the node its C name for codegen
+    int si = ck_struct_index(c, t.name)
+    if si >= 0 { t.name = c.structs[si].cname; return ty(TcStruct, t.name) }
+    int ei = ck_enum_index(c, t.name)
+    if ei >= 0 { t.name = c.enums[ei].cname; return ty(TcInt, t.name) }
+    string why = ck_hidden(c, t.name)
+    if why != "" { ck_error(c, t.line, t.col, why) }
+    else { ck_error(c, t.line, t.col, "unknown type '" + t.name + "'") }
     return ty(TcUnknown, "?")
 }
 
@@ -304,10 +381,15 @@ Type* ck_expr_i(Checker* c, Expr* e) {
             {
                 LookupResult v = ck_lookup(c, e.text)
                 if (v.found) { return v.type; }
-                string en = ck_enum_member(c, e.text)
-                if (en != "") { return ty(TcInt, en); }
+                int mi = ck_member_index(c, e.text)
+                if mi >= 0 {
+                    e.text = c.enum_members[mi].cname
+                    return ty(TcInt, c.enum_members[mi].enum_name)
+                }
                 if (e.text == "PI") { return ty(TcFloat, "float"); }        // prelude constant
                 if (e.text == "null") { return ty_ptr(ty(TcUnknown, "?")); }  // null pointer
+                string why = ck_hidden(c, e.text)
+                if why != "" { ck_error(c, e.line, e.col, why); return ty(TcUnknown, "?") }
                 // unknown name: an external C symbol (e.g. a raylib constant) if a header
                 // was imported; otherwise a real error.
                 if (!c.has_foreign) { ck_error(c, e.line, e.col, "use of undeclared name '" + e.text + "'"); }
@@ -440,7 +522,7 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                 if (ot.cat == TcStruct) { sname = ot.name; }
                 else if (ot.cat == TcPointer && ot.elem != null && ot.elem.cat == TcStruct) { sname = ot.elem.name; }
                 else { ck_error(c, e.line, e.col, "type " + t_str(ot) + " has no fields"); return ty(TcUnknown, "?"); }
-                int si = ck_struct_index(c, sname)
+                int si = ck_struct_by_cname(c, sname)
                 if (si >= 0) {
                     for i in 0..c.structs[si].fields.len {
                         if (c.structs[si].fields[i].name == e.field) { return c.structs[si].fields[i].type; }
@@ -480,7 +562,9 @@ Type* ck_expr_i(Checker* c, Expr* e) {
             {
                 int si = ck_struct_index(c, e.type_name)
                 if (si < 0) {
-                    ck_error(c, e.line, e.col, "unknown struct '" + e.type_name + "'")
+                    string why = ck_hidden(c, e.type_name)
+                    if why != "" { ck_error(c, e.line, e.col, why) }
+                    else { ck_error(c, e.line, e.col, "unknown struct '" + e.type_name + "'") }
                     for i in 0..e.items.len { ck_expr(c, e.items[i]); }
                     return ty(TcUnknown, "?")
                 }
@@ -495,6 +579,7 @@ Type* ck_expr_i(Checker* c, Expr* e) {
                     }
                 }
                 for i in k..e.items.len { ck_expr(c, e.items[i]); }
+                e.type_name = c.structs[si].cname   // codegen emits the C name
                 return ty(TcStruct, e.type_name)
             }
 
@@ -537,8 +622,14 @@ Type* ck_call(Checker* c, Expr* e) {
             if (arg.kind != ExName) { ck_error(c, arg.line, arg.col, "new() expects a type name"); return ty(TcUnknown, "?"); }
             Type* elem = ck_prim(arg.text)
             if (elem == null) {
-                if (ck_struct_index(c, arg.text) >= 0) { elem = ty(TcStruct, arg.text); }
-                else { ck_error(c, arg.line, arg.col, "unknown type '" + arg.text + "'"); elem = ty(TcUnknown, "?"); }
+                int si = ck_struct_index(c, arg.text)
+                if si >= 0 { arg.text = c.structs[si].cname; elem = ty(TcStruct, arg.text) }
+                else {
+                    string why = ck_hidden(c, arg.text)
+                    if why != "" { ck_error(c, arg.line, arg.col, why) }
+                    else { ck_error(c, arg.line, arg.col, "unknown type '" + arg.text + "'") }
+                    elem = ty(TcUnknown, "?")
+                }
             }
             arg.rtype = type_to_node(elem)// codegen reads this for sizeof(T)
             return ty_ptr(elem)
@@ -742,6 +833,7 @@ Type* ck_call(Checker* c, Expr* e) {
 
         int fi = ck_func_index(c, name)
         if (fi >= 0) {
+            callee.text = c.funcs[fi].cname   // codegen emits the C name
             int np = c.funcs[fi].params.len
             if (e.items.len != np) { ck_error(c, e.line, e.col, "function '" + name + "' expects " + int_to_str(np) + " argument(s), got " + int_to_str(e.items.len)); }
             int k = e.items.len
@@ -756,6 +848,14 @@ Type* ck_call(Checker* c, Expr* e) {
             return c.funcs[fi].ret
         }
 
+        // a Strata function this file can't see (even with C headers imported, it must not
+        // silently resolve to another module's private function)
+        string why = ck_hidden(c, name)
+        if why != "" {
+            ck_error(c, e.line, e.col, why)
+            for i in 0..e.items.len { ck_expr(c, e.items[i]); }
+            return ty(TcUnknown, "?")
+        }
         // unknown name: treat as an external C function if a header was imported; else error.
         if (!c.has_foreign) { ck_error(c, e.line, e.col, "call to undeclared function '" + name + "'"); }
         for i in 0..e.items.len { ck_expr(c, e.items[i]); }
@@ -900,43 +1000,143 @@ void ck_stmt(Checker* c, Stmt* s) {
     }
 }
 
-void ck_func(Checker* c, Decl* f) {
-    c.cur_ret = ck_type(c, f.ret)
+// Check a function body. Uses the signature resolved in pass 1d (the TypeNodes already
+// carry C names by then, so they must not be resolved a second time).
+void ck_func(Checker* c, Decl* f, int fi) {
+    c.cur_ret = c.funcs[fi].ret
     ck_push(c)
     for i in 0..f.params.len {
-        ck_declare(c, f.params[i].name, ck_type(c, f.params[i].type), false, f.line, f.col)
+        ck_declare(c, f.params[i].name, c.funcs[fi].params[i], false, f.line, f.col)
     }
     ck_block(c, f.body)
     ck_pop(c)
 }
 
-// ---- program -----------------------------------------------------------
+// ---- module-level names --------------------------------------------------
 
-bool ck_check(Checker* c, Program prog) {
-    // pass 0: note whether any C header is imported (enables external C calls)
-    for i in 0..prog.decls.len { if (prog.decls[i].kind == DcInclude) { c.has_foreign = true; } }
-    // pass 1a: enums + members
-    for i in 0..prog.decls.len {
-        Decl* d = prog.decls[i]
-        if (d.kind == DcEnum) {
-            c.enums.push(d.name)
-            for m in 0..d.members.len {
-                string mem = d.members[m]
-                if (ck_enum_member(c, mem) != "") { ck_error(c, d.line, d.col, "enum member '" + mem + "' is already defined"); }
-                c.enum_members.push(EnumMember{ mem, d.name })
+int ck_own_struct(Checker* c, string name, int module) {
+    for i in 0..c.structs.len { if c.structs[i].name == name && c.structs[i].module == module { return i } }
+    return 0 - 1
+}
+int ck_own_func(Checker* c, string name, int module) {
+    for i in 0..c.funcs.len { if c.funcs[i].name == name && c.funcs[i].module == module { return i } }
+    return 0 - 1
+}
+int ck_own_enum(Checker* c, string name, int module) {
+    for i in 0..c.enums.len { if c.enums[i].name == name && c.enums[i].module == module { return i } }
+    return 0 - 1
+}
+int ck_own_member(Checker* c, string name, int module) {
+    for i in 0..c.enum_members.len { if c.enum_members[i].member == name && c.enum_members[i].module == module { return i } }
+    return 0 - 1
+}
+
+// A module name as a C identifier prefix: `gfx.Renderer` -> `gfx_Renderer`.
+string ck_c_ident(string s) {
+    string r = ""
+    for i in 0..s.len {
+        char ch = s[i]
+        if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' { r = r + substr(s, i, 1) }
+        else { r = r + "_" }
+    }
+    return r
+}
+
+// The C name for a top-level declaration: private names that another module also
+// declares get the module prefix; everything else keeps its source name.
+string ck_cname(Checker* c, string name, int module, bool exported) {
+    if exported { return name }
+    for i in 0..c.names.len {
+        if c.names[i].name == name && c.names[i].module != module {
+            return ck_c_ident(c.mods[module].name) + "__" + name
+        }
+    }
+    return name
+}
+
+void ck_note_name(Checker* c, string name, int module, bool exported, int line, int col) {
+    c.names.push(NameEntry{ name, module, exported, line, col })
+}
+
+// Exported names must be unique program-wide (they are C symbols), and a module's own
+// declaration can't share a name with an export it can see.
+void ck_name_conflicts(Checker* c) {
+    for j in 0..c.names.len {
+        NameEntry b = c.names[j]
+        c.cur = b.module
+        for i in 0..j {
+            NameEntry a = c.names[i]
+            if a.name == b.name && a.module != b.module && a.exported && b.exported {
+                ck_error(c, b.line, b.col, "'" + b.name + "' is also exported by " + c.mods[a.module].file + " (exported names must be unique across the program)")
+            }
+        }
+        for i in 0..c.names.len {
+            NameEntry o = c.names[i]
+            if !b.exported && o.name == b.name && o.module != b.module && o.exported && ck_sees(c, o.module, true) {
+                ck_error(c, b.line, b.col, "'" + b.name + "' conflicts with the '" + b.name + "' exported by " + c.mods[o.module].file + ", which this file imports")
+                break
             }
         }
     }
-    // pass 1b: struct names
+}
+
+// ---- program -----------------------------------------------------------
+
+export bool ck_check(Checker* c, Program prog) {
+    // modules: a Program built without the loader (a single parsed file) is one module
+    c.mods = prog.modules
+    if c.mods.len == 0 { c.mods.push(new_module(c.file, c.file, c.file)) }
+    ck_visibility(c)
+
+    // pass 0: note whether any C header is imported (enables external C calls)
+    for i in 0..prog.decls.len { if (prog.decls[i].kind == DcInclude) { c.has_foreign = true; } }
+
+    // pass 1a: register every top-level name (enums + members, structs, functions);
+    // duplicates are errors within one module, and allowed (if private) across modules
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
-        if (d.kind == DcStruct) { FieldInfo[dynamic] ff = []; c.structs.push(StructInfo{ d.name, ff }); }
+        c.cur = d.module
+        if d.kind == DcEnum {
+            if ck_own_enum(c, d.name, d.module) >= 0 { ck_error(c, d.line, d.col, "enum '" + d.name + "' is already defined") }
+            c.enums.push(EnumInfo{ d.name, d.module, d.is_exported, d.name })
+            ck_note_name(c, d.name, d.module, d.is_exported, d.line, d.col)
+            for m in 0..d.members.len {
+                string mem = d.members[m]
+                if ck_own_member(c, mem, d.module) >= 0 { ck_error(c, d.line, d.col, "enum member '" + mem + "' is already defined") }
+                c.enum_members.push(EnumMember{ mem, d.name, d.module, d.is_exported, mem })
+                ck_note_name(c, mem, d.module, d.is_exported, d.line, d.col)
+            }
+        } else if d.kind == DcStruct {
+            if ck_own_struct(c, d.name, d.module) >= 0 { ck_error(c, d.line, d.col, "struct '" + d.name + "' is already defined") }
+            FieldInfo[dynamic] ff = []
+            c.structs.push(StructInfo{ d.name, ff, d.module, d.is_exported, d.name })
+            ck_note_name(c, d.name, d.module, d.is_exported, d.line, d.col)
+        } else if d.kind == DcFunc {
+            if ck_own_func(c, d.name, d.module) >= 0 { ck_error(c, d.line, d.col, "function '" + d.name + "' is already defined") }
+            Type*[dynamic] ps = []
+            c.funcs.push(FuncInfo{ d.name, ps, ty(TcVoid, "void"), d.module, d.is_exported, d.name })
+            ck_note_name(c, d.name, d.module, d.is_exported, d.line, d.col)
+        }
     }
+
+    // pass 1b: C names (a private name declared in several modules gets a prefix),
+    // then the module-level name rules
+    for i in 0..c.enums.len { c.enums[i].cname = ck_cname(c, c.enums[i].name, c.enums[i].module, c.enums[i].exported) }
+    for i in 0..c.enum_members.len {
+        EnumMember m = c.enum_members[i]
+        c.enum_members[i].cname = ck_cname(c, m.member, m.module, m.exported)
+        c.enum_members[i].enum_name = c.enums[ck_own_enum(c, m.enum_name, m.module)].cname
+    }
+    for i in 0..c.structs.len { c.structs[i].cname = ck_cname(c, c.structs[i].name, c.structs[i].module, c.structs[i].exported) }
+    for i in 0..c.funcs.len { c.funcs[i].cname = ck_cname(c, c.funcs[i].name, c.funcs[i].module, c.funcs[i].exported) }
+    ck_name_conflicts(c)
+
     // pass 1c: struct fields
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if (d.kind == DcStruct) {
-            int si = ck_struct_index(c, d.name)
+            c.cur = d.module
+            int si = ck_own_struct(c, d.name, d.module)
             for fld in 0..d.fields.len {
                 c.structs[si].fields.push(FieldInfo{ d.fields[fld].name, ck_type(c, d.fields[fld].type) })
             }
@@ -946,29 +1146,46 @@ bool ck_check(Checker* c, Program prog) {
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
         if (d.kind == DcFunc) {
-            if (ck_func_index(c, d.name) >= 0) { ck_error(c, d.line, d.col, "function '" + d.name + "' is already defined"); }
-            Type*[dynamic] ps = []
-            for pi in 0..d.params.len { ps.push(ck_type(c, d.params[pi].type)); }
-            c.funcs.push(FuncInfo{ d.name, ps, ck_type(c, d.ret) })
+            c.cur = d.module
+            int fi = ck_own_func(c, d.name, d.module)
+            for pi in 0..d.params.len { c.funcs[fi].params.push(ck_type(c, d.params[pi].type)); }
+            c.funcs[fi].ret = ck_type(c, d.ret)
         }
     }
     // pass 2: function bodies
     for i in 0..prog.decls.len {
         Decl* d = prog.decls[i]
-        if (d.kind == DcFunc) { ck_func(c, d); }
+        if (d.kind == DcFunc) {
+            c.cur = d.module
+            ck_func(c, d, ck_own_func(c, d.name, d.module))
+        }
     }
-    // pass 3: top-level code (the implicit main)
+    // pass 3: top-level code (the implicit main) - the root module's
+    c.cur = 0
     c.cur_ret = ty(TcVoid, "void")
     ck_push(c)
     for i in 0..prog.main.len { ck_stmt(c, prog.main[i]); }
     ck_pop(c)
+
+    // finally: declarations take their C names (codegen emits d.name / d.members)
+    for i in 0..prog.decls.len {
+        Decl* d = prog.decls[i]
+        if d.kind == DcFunc   { d.name = c.funcs[ck_own_func(c, d.name, d.module)].cname }
+        if d.kind == DcStruct { d.name = c.structs[ck_own_struct(c, d.name, d.module)].cname }
+        if d.kind == DcEnum {
+            for m in 0..d.members.len { d.members[m] = c.enum_members[ck_own_member(c, d.members[m], d.module)].cname }
+            d.name = c.enums[ck_own_enum(c, d.name, d.module)].cname
+        }
+    }
     return !c.had_error
 }
 
-Checker* new_checker(string file) {
+export Checker* new_checker(string file) {
     StructInfo[dynamic] ss = []
     FuncInfo[dynamic]   fs = []
-    string[dynamic]        es = []
+    EnumInfo[dynamic]   es = []
     EnumMember[dynamic] ems = []
-    return alloc(Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void"), null })
+    Module[dynamic]     mods = []
+    NameEntry[dynamic]  names = []
+    return alloc(Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void"), mods, 0, names })
 }

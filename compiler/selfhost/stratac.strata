@@ -11,37 +11,14 @@
 //   stratac build  <file.strata>   compile to a native executable
 //   stratac run    <file.strata>   compile and run
 
-// print_tokens / print_program (+ the core via core.dmm)
-import dump
+import core   // the compiler (every phase, re-exported)
+import dump   // print_tokens / print_program
 import <stdlib.h>   // system()  (C header, passed through to the generated C)
 
-string stratac_version() { return "1.0.0 (self-hosted)"; }
+string stratac_version() { return "1.1.0 (modules)"; }
 
 // ---- paths -------------------------------------------------------------
-
-string stem_of(string p) {
-    int dot = 0 - 1
-    int slash = 0 - 1
-    for i in 0..p.len {
-        if (p[i] == '.') { dot = i; }
-        if (p[i] == '/' || p[i] == '\\') { slash = i; }
-    }
-    if (dot >= 0 && (slash < 0 || dot > slash)) { return substr(p, 0, dot); }
-    return p
-}
-
-string basename_of(string p) {
-    int slash = 0 - 1
-    for i in 0..p.len { if (p[i] == '/' || p[i] == '\\') { slash = i; } }
-    return substr(p, slash + 1, p.len - (slash + 1))
-}
-
-string dirname_of(string p) {
-    int slash = 0 - 1
-    for i in 0..p.len { if (p[i] == '/' || p[i] == '\\') { slash = i; } }
-    if (slash < 0) { return "."; }
-    return substr(p, 0, slash)
-}
+// (stem_of / basename_of / dirname_of live in the core's module loader)
 
 bool file_exists(string p) { return read_file(p).len > 0; }
 
@@ -55,108 +32,30 @@ string resolve_libdir(string argv0) {
     return dir + "/lib"
 }
 
-// ---- module resolution -------------------------------------------------
-// `import Name` / `import a.b.Name` pastes the contents of Name.strata / a/b/Name.strata
-// (recursively, deduplicated) into the source. C-header imports (import "x.h" /
-// import <x.h>) are left in place for codegen. Mirrors D--'s #include preprocessor.
-
-struct ModPP { string[dynamic] seen; string out; SrcMap* map; }
-
-bool mod_seen(ModPP* pp, string path) {
-    for i in 0..pp.seen.len { if (pp.seen[i] == path) { return true; } }
-    return false
-}
-
-// If `line` is a Strata module import, return the module name; else return "".
-string parse_module_import(string line) {
-    int i = 0
-    while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
-    string kw = "import"
-    if (i + kw.len > line.len) { return ""; }
-    if (substr(line, i, kw.len) != kw) { return ""; }
-    i = i + kw.len
-    if (i >= line.len || (line[i] != ' ' && line[i] != '\t')) { return ""; }   // needs a space
-    while (i < line.len && (line[i] == ' ' || line[i] == '\t')) { i = i + 1; }
-    if (i >= line.len) { return ""; }
-    char c = line[i]
-    if (c == '<' || c == '"') { return ""; }   // a C header, not a module
-    string name = ""
-    while (i < line.len && line[i] != ' ' && line[i] != '\t' && line[i] != '\r') { name = name + substr(line, i, 1); i = i + 1; }
-    return name
-}
-
-string module_to_path(string base, string name) {
-    string rel = ""
-    for i in 0..name.len { if (name[i] == '.') { rel = rel + "/"; } else { rel = rel + substr(name, i, 1); } }
-    return base + "/" + rel + ".strata"
-}
-
-void mod_line(ModPP* pp, string line, string base, string path, int lineno) {
-    string name = parse_module_import(line)
-    if (name.len > 0) {
-        string resolved = module_to_path(base, name)
-        if (!mod_seen(pp, resolved)) {
-            pp.seen.push(resolved)
-            mod_file(pp, resolved)
-        }
-    } else {
-        pp.out = pp.out + line + "\n"
-        pp.map.files.push(basename_of(path))
-        pp.map.lines.push(lineno)
-    }
-}
-
-void mod_file(ModPP* pp, string path) {
-    string src = read_file(path)
-    string base = dirname_of(path)
-    string line = ""
-    int lineno = 1
-    for i in 0..(src.len) + 1 {
-        if (i == src.len) {
-            if (line.len > 0) { mod_line(pp, line, base, path, lineno); }
-        } else {
-            if (src[i] == '\n') { mod_line(pp, line, base, path, lineno); line = ""; lineno += 1; }
-            else                { line = line + substr(src, i, 1); }
-        }
-    }
-}
-
-string resolve_modules(string path, SrcMap* map) {
-    string[dynamic] seed = []
-    ModPP pp = ModPP{ seed, "", map }
-    pp.seen.push(path)
-    mod_file(&pp, path)
-    return pp.out
-}
-
 // ---- pipeline helpers --------------------------------------------------
-
-void report_parse_error(Parser* p, SrcMap* map, string path) {
-    print(src_loc(map, basename_of(path), p.err_line, p.err_col) + ": parse error: " + p.err_msg)
-}
 
 int cmd_tokens(string path) {
     print_tokens(lex(read_file(path)))
     return 0
 }
 
+// `ast` shows ONE file as parsed (imports appear as nodes; nothing is loaded).
 int cmd_ast(string path) {
-    Token[dynamic] toks = lex(read_file(path))
-    Parser p = new_parser(toks)
+    Parser p = new_parser(lex(read_file(path)))
     Program prog = parse_program(&p)
-    if (p.had_error) { report_parse_error(&p, null, path); return 1; }
+    if p.had_error {
+        print(basename_of(path) + ":" + int_to_str(p.err_line) + ":" + int_to_str(p.err_col) + ": parse error: " + p.err_msg)
+        return 1
+    }
     print_program(prog)
     return 0
 }
 
 int cmd_check(string path) {
-    SrcMap* map = new_srcmap()
-    Token[dynamic] toks = lex(resolve_modules(path, map))
-    Parser p = new_parser(toks)
-    Program prog = parse_program(&p)
-    if (p.had_error) { report_parse_error(&p, map, path); return 1; }
+    LoadResult lr = load_program(path)
+    if (!lr.ok) { return 1; }
+    Program prog = lr.prog
     Checker* ck = new_checker(basename_of(path))
-    ck.map = map
     ck_check(ck, prog)
     if (ck.had_error) { return 1; }
     print("no type errors")
@@ -164,13 +63,10 @@ int cmd_check(string path) {
 }
 
 int cmd_emit(string path) {
-    SrcMap* map = new_srcmap()
-    Token[dynamic] toks = lex(resolve_modules(path, map))
-    Parser p = new_parser(toks)
-    Program prog = parse_program(&p)
-    if (p.had_error) { report_parse_error(&p, map, path); return 1; }
+    LoadResult lr = load_program(path)
+    if (!lr.ok) { return 1; }
+    Program prog = lr.prog
     Checker* ck = new_checker(basename_of(path))
-    ck.map = map
     ck_check(ck, prog)
     if (ck.had_error) { return 1; }
     Codegen cg = Codegen{ "", false }
@@ -181,13 +77,10 @@ int cmd_emit(string path) {
 }
 
 bool build_exe(string path, string libdir, bool quiet) {
-    SrcMap* map = new_srcmap()
-    Token[dynamic] toks = lex(resolve_modules(path, map))
-    Parser p = new_parser(toks)
-    Program prog = parse_program(&p)
-    if (p.had_error) { report_parse_error(&p, map, path); return false; }
+    LoadResult lr = load_program(path)
+    if (!lr.ok) { return false; }
+    Program prog = lr.prog
     Checker* ck = new_checker(basename_of(path))
-    ck.map = map
     ck_check(ck, prog)
     if (ck.had_error) { return false; }
     Codegen cg = Codegen{ "", false }

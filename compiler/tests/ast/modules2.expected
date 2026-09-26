@@ -1,0 +1,55 @@
+Import module mods.all
+Func int helper(int x)
+  Block
+    Return
+      Binary +
+        Name x
+        Int 1
+Main
+  Var Rect r
+    =
+      StructLit Rect
+        Int 4
+        Int 3
+  ExprStmt
+    Call
+      callee:
+        Name print
+      args:
+        Call
+          callee:
+            Name area
+          args:
+            Name r
+  ExprStmt
+    Call
+      callee:
+        Name print
+      args:
+        Call
+          callee:
+            Name tag
+          args:
+            String "hi"
+  ExprStmt
+    Call
+      callee:
+        Name print
+      args:
+        Call
+          callee:
+            Name helper
+          args:
+            Int 41
+  ExprStmt
+    Call
+      callee:
+        Name print
+      args:
+        Binary ==
+          Call
+            callee:
+              Name kind_of
+            args:
+              Name r
+          Name Wide

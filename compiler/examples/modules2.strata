@@ -1,0 +1,11 @@
+// modules2.strata - the module system: private helpers, re-exports, dotted imports.
+import mods.all        // re-exports mods.shapes + mods.words
+
+// a THIRD private `helper`, in the main file; none of the three collide
+int helper(int x) { return x + 1 }
+
+Rect r = Rect{ 4, 3 }
+print(area(r))               // 12  (shapes' helper)
+print(tag("hi"))             // <hi> (words' helper)
+print(helper(41))            // 42  (this file's helper)
+print(kind_of(r) == Wide)    // 1
