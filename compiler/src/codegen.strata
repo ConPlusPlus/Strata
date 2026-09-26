@@ -14,6 +14,7 @@
 
 // AST + Parser (brings lexer/token)
 import parser
+import "strata_host.h"   // strata_join
 import ast
 
 // Output is collected as a list of pieces and joined once at the end: appending to one
@@ -28,22 +29,8 @@ export Codegen new_codegen() {
 
 void cg_out(Codegen* cg, string s) { cg.parts.push(s) }
 
-// Concatenate pieces pairwise, level by level: each level copies the text once, so the
-// total work is O(n log k) instead of O(n * k).
-string join_pieces(string[dynamic] pieces) {
-    if pieces.len == 0 { return "" }
-    string[dynamic] cur = pieces
-    while cur.len > 1 {
-        string[dynamic] next = []
-        int i = 0
-        while i < cur.len {
-            if i + 1 < cur.len { next.push(cur[i] + cur[i + 1]) } else { next.push(cur[i]) }
-            i += 2
-        }
-        cur = next
-    }
-    return cur[0]
-}
+// Join the pieces in one pass (strata_join in strata_host.h: one allocation, one copy).
+string join_pieces(string[dynamic] pieces) { return strata_join(&pieces) }
 
 // ---- helpers -----------------------------------------------------------
 

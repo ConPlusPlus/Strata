@@ -58,10 +58,52 @@ static inline void strata_capture_end(void) { strata_host_capturing = 0; }
 /* The captured messages, one per line ("" if none). Survives strata_host_reset(). */
 static inline const char* strata_capture_text(void) { return strata_host_buf ? strata_host_buf : ""; }
 
+/* ---- joining strings -------------------------------------------------------- */
+
+/* Concatenate a string[dynamic] in one pass: measure every piece, allocate once, copy
+ * once. (In Strata, joining n pieces with `+` copies the growing result each time.) */
+static inline const char* strata_join(const Array* parts) {
+    const char** p = (const char**)parts->data;
+    size_t total = 0;
+    for (long long i = 0; i < parts->len; i++) total += strlen(p[i]);
+    char* r = (char*)arena_alloc(strata_str_arena(), total + 1);
+    size_t at = 0;
+    for (long long i = 0; i < parts->len; i++) {
+        size_t n = strlen(p[i]);
+        memcpy(r + at, p[i], n);
+        at += n;
+    }
+    r[total] = '\0';
+#ifdef STRATA_STR_LEN_CACHE
+    strata_len_put(r, total);
+#endif
+    return r;
+}
+
 /* ---- memory --------------------------------------------------------------- */
 
+/* Free one dynamic array's buffer now (e.g. a module's tokens once it's parsed) and leave
+ * it empty. Only for arrays nothing else still points into. */
+static inline void strata_array_free(Array* a) {
+#ifdef STRATA_ARR_TRACKED
+    if (a->data) {
+        StrataArrLink* h = ((StrataArrLink*)a->data) - 1;
+        h->prev->next = h->next;
+        h->next->prev = h->prev;
+        free(h);
+    }
+#else
+    free(a->data);           /* older runtimes: a plain malloc'd buffer */
+#endif
+    a->data = 0; a->len = 0; a->cap = 0;
+}
+
 static inline void strata_host_reset(void) {
+#ifdef STRATA_STR_LEN_CACHE   /* frees the strings and forgets their remembered lengths */
+    strata_str_reset();
+#else
     arena_free(strata_str_arena());
+#endif
     arena_free(strata_heap());
 #ifdef STRATA_ARR_TRACKED   /* older runtimes (e.g. the bootstrap release's) can't free arrays */
     strata_arr_free_all();

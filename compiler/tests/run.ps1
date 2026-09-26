@@ -74,6 +74,32 @@ Get-ChildItem -Path (Join-Path $here "projects") -Directory | ForEach-Object {
     else     { Write-Host "FAIL  project/$name" -ForegroundColor Red;   $script:fail++ }
 }
 
+# --- performance: guard against the compiler going quadratic again -------------------
+# A generated 20k-line single file must type-check in under 3 s. (It takes ~0.05 s; before
+# the fixes in 1.4.0 it took 16 s, because every token re-measured the whole source.)
+$perfDir = Join-Path $here "embed\build"
+if (-not (Test-Path $perfDir)) { New-Item -ItemType Directory -Path $perfDir | Out-Null }
+$perfFile = Join-Path $perfDir "perf20k.strata"
+$sb = New-Object System.Text.StringBuilder
+for ($f = 0; $f -lt 2500; $f++) {
+    [void]$sb.AppendLine("struct T$f { int a; float b; vec3 p }")
+    [void]$sb.AppendLine("int f$f(int x) { var t = T$f{ x, 1.5, vec3(1, 2, 3) }")
+    [void]$sb.AppendLine("    int acc = t.a + $f")
+    [void]$sb.AppendLine("    for i in 0..3 { acc += i * 2 }")
+    [void]$sb.AppendLine("    if acc > 100 { return acc - 1 }")
+    [void]$sb.AppendLine("    return acc }")
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("")
+}
+[void]$sb.AppendLine("print(f0(1))")
+[IO.File]::WriteAllText($perfFile, $sb.ToString())
+$t = Measure-Command { & $strata check $perfFile | Out-Null }
+if ($LASTEXITCODE -eq 0 -and $t.TotalSeconds -lt 3) {
+    Write-Host ("PASS  perf/check-20k-lines ({0:N2} s)" -f $t.TotalSeconds) -ForegroundColor Green; $pass++
+} else {
+    Write-Host ("FAIL  perf/check-20k-lines ({0:N2} s, exit {1})" -f $t.TotalSeconds, $LASTEXITCODE) -ForegroundColor Red; $fail++
+}
+
 # --- embedding: host programs using libstrata and a Strata-built dll ---------------
 # tests/embed/ holds small "engines": C (the C API), C++ (strata.hpp), C# (Strata.cs, if a
 # .NET SDK is installed), and a C program calling tests/projects/lib's dll through its

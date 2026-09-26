@@ -38,13 +38,14 @@ static inline const char* strata_read_file(const char* path) {
     size_t got = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[got] = '\0';
+    strata_len_put(buf, got);
     return buf;
 }
 
 static inline bool strata_write_file(const char* path, const char* data) {
     FILE* f = fopen(path, "wb");
     if (!f) return false;
-    size_t len = strlen(data);
+    size_t len = strata_strlen(data);
     size_t wrote = len ? fwrite(data, 1, len, f) : 0;
     fclose(f);
     return wrote == len;

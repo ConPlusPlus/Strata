@@ -71,7 +71,12 @@ bool match(Lexer* l, char expected) {
 // ---- token construction ------------------------------------------------
 
 Token make(Lexer* l, TokKind kind) {
-    return Token{ kind, substr(l.src, l.start, l.pos - l.start), l.start_line, l.start_col }
+    // Only identifiers and numbers need a copy of their source text. Every other token's
+    // text is fixed ("+", "var", ...), so they share kind_name's constant string.
+    if kind == TkIdent || kind == TkInt || kind == TkFloat {
+        return Token{ kind, substr(l.src, l.start, l.pos - l.start), l.start_line, l.start_col }
+    }
+    return Token{ kind, kind_name(kind), l.start_line, l.start_col }
 }
 Token make_text(Lexer* l, TokKind kind, string text) {
     return Token{ kind, text, l.start_line, l.start_col }

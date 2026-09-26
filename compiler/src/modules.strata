@@ -86,9 +86,11 @@ int ld_module(Loader* ld, string path, string file, string name, bool is_root) {
     ld.prog.modules.push(new_module(name, path, file))   // registered first, so cycles terminate
 
     string src = ""
-    if is_root && ld.has_text { src = ld.root_text } else { src = read_file(path) }
+    // (a host's text is copied once, so the runtime remembers its length; see sstr.h)
+    if is_root && ld.has_text { src = substr(ld.root_text, 0, ld.root_text.len) } else { src = read_file(path) }
     Parser p = new_parser(lex(src))
     Program part = parse_program(&p)
+    strata_array_free(&p.toks)   // the AST keeps what it needs; the tokens are done
     if p.had_error {
         strata_report(file + ":" + int_to_str(p.err_line) + ":" + int_to_str(p.err_col) + ": parse error: " + p.err_msg)
         ld.had_error = true

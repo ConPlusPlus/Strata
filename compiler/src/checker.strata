@@ -95,6 +95,36 @@ struct EnumMember{ string member; string enum_name; int module; bool exported; s
 // One entry per top-level name (all kinds), for the module-level name checks.
 struct NameEntry { string name; int module; bool exported; int line; int col; }
 
+// A hash index from names to entries of one table: chains of entry numbers, newest first.
+// (Strata has no built-in map yet.) Sized up front from the number of declarations, so
+// entries are added as they are registered and it never needs to grow its buckets.
+struct NameIdx { int[dynamic] head; int[dynamic] next; int mask }
+
+NameIdx new_idx(int n) {
+    int cap = 16
+    while cap < n * 2 { cap = cap * 2 }
+    int[dynamic] head = []
+    for i in 0..cap { head.push(0) }
+    int[dynamic] next = []
+    return NameIdx{ head, next, cap - 1 }
+}
+
+int name_hash(string s, int mask) {
+    u64 h = 5381
+    int n = s.len
+    for i in 0..n { h = h * 33 + cast<u64>(cast<u8>(s[i])) }
+    return cast<int>(h & cast<u64>(mask))
+}
+
+// Entries must be added in order 0, 1, 2, ... (entry k = the table's k-th element).
+void idx_add(NameIdx* x, string key, int k) {
+    int b = name_hash(key, x.mask)
+    x.next.push(x.head[b])
+    x.head[b] = k + 1
+}
+int idx_first(NameIdx* x, string key) { return x.head[name_hash(key, x.mask)] - 1 }
+int idx_next(NameIdx* x, int k) { return x.next[k] - 1 }
+
 export struct Checker {
     string          file
     bool         had_error
@@ -108,6 +138,17 @@ export struct Checker {
     Module[dynamic]    mods// the program's modules (see modules.strata)
     int          cur// module whose code is being checked
     NameEntry[dynamic] names
+    // hash indexes over the tables above (chains are newest-first, so a lookup that
+    // wants the earliest match keeps the last one it sees)
+    NameIdx      struct_idx
+    NameIdx      cname_idx// structs by C name
+    NameIdx      func_idx
+    NameIdx      enum_idx
+    NameIdx      member_idx
+    NameIdx      name_idx
+    // shared result-type nodes for named types (see ck_node)
+    TypeNode*[dynamic] nodes
+    NameIdx      node_idx
 }
 
 struct LookupResult { bool found; Type* type; bool is_const; }
@@ -154,14 +195,16 @@ string ck_hidden(Checker* c, string name) {
     int owner = 0 - 1
     bool exported = false
     int best = 0
-    for i in 0..c.names.len {
-        NameEntry n = c.names[i]
+    int k = idx_first(&c.name_idx, name)
+    while k >= 0 {
+        NameEntry n = c.names[k]
         if n.name == name && n.module != c.cur {
             int score = 1
             if !n.exported && ck_sees(c, n.module, true) { score = 3 }
             else if n.exported { score = 2 }
-            if score > best { best = score; owner = n.module; exported = n.exported }
+            if score >= best { best = score; owner = n.module; exported = n.exported }   // >=: prefer the earliest
         }
+        k = idx_next(&c.name_idx, k)
     }
     if owner < 0 { return "" }
     string f = c.mods[owner].file
@@ -174,33 +217,50 @@ string ck_hidden(Checker* c, string name) {
 // don't need to.
 
 int ck_struct_index(Checker* c, string name) {
-    for i in 0..c.structs.len {
-        if c.structs[i].name == name && ck_sees(c, c.structs[i].module, c.structs[i].exported) { return i }
+    int found = 0 - 1
+    int k = idx_first(&c.struct_idx, name)
+    while k >= 0 {
+        if c.structs[k].name == name && ck_sees(c, c.structs[k].module, c.structs[k].exported) { found = k }
+        k = idx_next(&c.struct_idx, k)
     }
-    return 0 - 1
+    return found
 }
 int ck_struct_by_cname(Checker* c, string cname) {
-    for i in 0..c.structs.len { if c.structs[i].cname == cname { return i } }
-    return 0 - 1
+    int found = 0 - 1
+    int k = idx_first(&c.cname_idx, cname)
+    while k >= 0 {
+        if c.structs[k].cname == cname { found = k }
+        k = idx_next(&c.cname_idx, k)
+    }
+    return found
 }
 int ck_func_index(Checker* c, string name) {
-    for i in 0..c.funcs.len {
-        if c.funcs[i].name == name && ck_sees(c, c.funcs[i].module, c.funcs[i].exported) { return i }
+    int found = 0 - 1
+    int k = idx_first(&c.func_idx, name)
+    while k >= 0 {
+        if c.funcs[k].name == name && ck_sees(c, c.funcs[k].module, c.funcs[k].exported) { found = k }
+        k = idx_next(&c.func_idx, k)
     }
-    return 0 - 1
+    return found
 }
 int ck_enum_index(Checker* c, string name) {
-    for i in 0..c.enums.len {
-        if c.enums[i].name == name && ck_sees(c, c.enums[i].module, c.enums[i].exported) { return i }
+    int found = 0 - 1
+    int k = idx_first(&c.enum_idx, name)
+    while k >= 0 {
+        if c.enums[k].name == name && ck_sees(c, c.enums[k].module, c.enums[k].exported) { found = k }
+        k = idx_next(&c.enum_idx, k)
     }
-    return 0 - 1
+    return found
 }
 int ck_member_index(Checker* c, string name) {
-    for i in 0..c.enum_members.len {
-        EnumMember m = c.enum_members[i]
-        if m.member == name && ck_sees(c, m.module, m.exported) { return i }
+    int found = 0 - 1
+    int k = idx_first(&c.member_idx, name)
+    while k >= 0 {
+        EnumMember m = c.enum_members[k]
+        if m.member == name && ck_sees(c, m.module, m.exported) { found = k }
+        k = idx_next(&c.member_idx, k)
     }
-    return 0 - 1
+    return found
 }
 
 // ---- types -------------------------------------------------------------
@@ -352,9 +412,32 @@ LvalueResult ck_lvalue(Checker* c, Expr* e) {
 
 // Wrapper: check an expression, then annotate the AST node with its resolved type so
 // codegen can consult it (e.g. `.` vs `->`). All sub-expressions go through here too.
+// The node recorded as an expression's result type. Codegen only reads these, so every
+// expression of a NAMED type (int, vec3, Entity, ...) shares one node per name instead of
+// allocating its own; pointer/array types are built fresh as before.
+TypeNode* ck_node(Checker* c, Type* t) {
+    if t == null { return null }
+    string n = t.name
+    if t.cat == TcBool { n = "bool" }
+    else if t.cat == TcChar { n = "char" }
+    else if t.cat == TcStr { n = "string" }
+    else if !(t.cat == TcInt || t.cat == TcFloat || t.cat == TcVec || t.cat == TcMat || t.cat == TcQuat || t.cat == TcStruct) {
+        return type_to_node(t)
+    }
+    int k = idx_first(&c.node_idx, n)
+    while k >= 0 {
+        if c.nodes[k].name == n { return c.nodes[k] }
+        k = idx_next(&c.node_idx, k)
+    }
+    TypeNode* node = named_node(n)
+    idx_add(&c.node_idx, n, c.nodes.len)
+    c.nodes.push(node)
+    return node
+}
+
 Type* ck_expr(Checker* c, Expr* e) {
     Type* t = ck_expr_i(c, e)
-    e.rtype = type_to_node(t)
+    e.rtype = ck_node(c, t)
     return t
 }
 
@@ -364,7 +447,7 @@ Type* ck_expr(Checker* c, Expr* e) {
 Type* ck_expr_as(Checker* c, Expr* e, Type* target) {
     Type* t = ck_expr(c, e)
     if (e.kind == ExArrayLit && target.cat == TcDynArray && t.cat == TcDynArray && ck_assignable(target, t)) {
-        e.rtype = type_to_node(target)
+        e.rtype = ck_node(c, target)
         return target
     }
     return t
@@ -1016,20 +1099,40 @@ void ck_func(Checker* c, Decl* f, int fi) {
 // ---- module-level names --------------------------------------------------
 
 int ck_own_struct(Checker* c, string name, int module) {
-    for i in 0..c.structs.len { if c.structs[i].name == name && c.structs[i].module == module { return i } }
-    return 0 - 1
+    int found = 0 - 1
+    int k = idx_first(&c.struct_idx, name)
+    while k >= 0 {
+        if c.structs[k].name == name && c.structs[k].module == module { found = k }
+        k = idx_next(&c.struct_idx, k)
+    }
+    return found
 }
 int ck_own_func(Checker* c, string name, int module) {
-    for i in 0..c.funcs.len { if c.funcs[i].name == name && c.funcs[i].module == module { return i } }
-    return 0 - 1
+    int found = 0 - 1
+    int k = idx_first(&c.func_idx, name)
+    while k >= 0 {
+        if c.funcs[k].name == name && c.funcs[k].module == module { found = k }
+        k = idx_next(&c.func_idx, k)
+    }
+    return found
 }
 int ck_own_enum(Checker* c, string name, int module) {
-    for i in 0..c.enums.len { if c.enums[i].name == name && c.enums[i].module == module { return i } }
-    return 0 - 1
+    int found = 0 - 1
+    int k = idx_first(&c.enum_idx, name)
+    while k >= 0 {
+        if c.enums[k].name == name && c.enums[k].module == module { found = k }
+        k = idx_next(&c.enum_idx, k)
+    }
+    return found
 }
 int ck_own_member(Checker* c, string name, int module) {
-    for i in 0..c.enum_members.len { if c.enum_members[i].member == name && c.enum_members[i].module == module { return i } }
-    return 0 - 1
+    int found = 0 - 1
+    int k = idx_first(&c.member_idx, name)
+    while k >= 0 {
+        if c.enum_members[k].member == name && c.enum_members[k].module == module { found = k }
+        k = idx_next(&c.member_idx, k)
+    }
+    return found
 }
 
 // A module name as a C identifier prefix: `gfx.Renderer` -> `gfx_Renderer`.
@@ -1047,15 +1150,18 @@ string ck_c_ident(string s) {
 // declares get the module prefix; everything else keeps its source name.
 string ck_cname(Checker* c, string name, int module, bool exported) {
     if exported { return name }
-    for i in 0..c.names.len {
-        if c.names[i].name == name && c.names[i].module != module {
+    int k = idx_first(&c.name_idx, name)
+    while k >= 0 {
+        if c.names[k].name == name && c.names[k].module != module {
             return ck_c_ident(c.mods[module].name) + "__" + name
         }
+        k = idx_next(&c.name_idx, k)
     }
     return name
 }
 
 void ck_note_name(Checker* c, string name, int module, bool exported, int line, int col) {
+    idx_add(&c.name_idx, name, c.names.len)
     c.names.push(NameEntry{ name, module, exported, line, col })
 }
 
@@ -1065,19 +1171,25 @@ void ck_name_conflicts(Checker* c) {
     for j in 0..c.names.len {
         NameEntry b = c.names[j]
         c.cur = b.module
-        for i in 0..j {
-            NameEntry a = c.names[i]
-            if a.name == b.name && a.module != b.module && a.exported && b.exported {
-                ck_error(c, b.line, b.col, "'" + b.name + "' is also exported by " + c.mods[a.module].file + " (exported names must be unique across the program)")
+        // earlier entries exporting the same name (reported oldest first)
+        int[dynamic] dups = []
+        int conflict = 0 - 1
+        int k = idx_first(&c.name_idx, b.name)
+        while k >= 0 {
+            NameEntry o = c.names[k]
+            if o.name == b.name && o.module != b.module && o.exported {
+                if k < j && b.exported { dups.push(k) }
+                if !b.exported && ck_sees(c, o.module, true) { conflict = k }   // keeps the earliest
             }
+            k = idx_next(&c.name_idx, k)
         }
-        bool reported = false
-        for i in 0..c.names.len {
-            NameEntry o = c.names[i]
-            if !reported && !b.exported && o.name == b.name && o.module != b.module && o.exported && ck_sees(c, o.module, true) {
-                ck_error(c, b.line, b.col, "'" + b.name + "' conflicts with the '" + b.name + "' exported by " + c.mods[o.module].file + ", which this file imports")
-                reported = true
-            }
+        int d = dups.len - 1
+        while d >= 0 {
+            ck_error(c, b.line, b.col, "'" + b.name + "' is also exported by " + c.mods[c.names[dups[d]].module].file + " (exported names must be unique across the program)")
+            d -= 1
+        }
+        if conflict >= 0 {
+            ck_error(c, b.line, b.col, "'" + b.name + "' conflicts with the '" + b.name + "' exported by " + c.mods[c.names[conflict].module].file + ", which this file imports")
         }
     }
 }
@@ -1093,6 +1205,16 @@ export bool ck_check(Checker* c, Program prog) {
     // pass 0: note whether any C header is imported (enables external C calls)
     for i in 0..prog.decls.len { if (prog.decls[i].kind == DcInclude) { c.has_foreign = true; } }
 
+    // size the name indexes (so they never need to grow)
+    int n_all = 0
+    for i in 0..prog.decls.len { n_all = n_all + 1 + prog.decls[i].members.len }
+    c.struct_idx = new_idx(n_all)
+    c.func_idx = new_idx(n_all)
+    c.enum_idx = new_idx(n_all)
+    c.member_idx = new_idx(n_all)
+    c.name_idx = new_idx(n_all)
+    c.node_idx = new_idx(n_all)
+
     // pass 1a: register every top-level name (enums + members, structs, functions);
     // duplicates are errors within one module, and allowed (if private) across modules
     for i in 0..prog.decls.len {
@@ -1100,22 +1222,26 @@ export bool ck_check(Checker* c, Program prog) {
         c.cur = d.module
         if d.kind == DcEnum {
             if ck_own_enum(c, d.name, d.module) >= 0 { ck_error(c, d.line, d.col, "enum '" + d.name + "' is already defined") }
+            idx_add(&c.enum_idx, d.name, c.enums.len)
             c.enums.push(EnumInfo{ d.name, d.module, d.is_exported, d.name })
             ck_note_name(c, d.name, d.module, d.is_exported, d.line, d.col)
             for m in 0..d.members.len {
                 string mem = d.members[m]
                 if ck_own_member(c, mem, d.module) >= 0 { ck_error(c, d.line, d.col, "enum member '" + mem + "' is already defined") }
+                idx_add(&c.member_idx, mem, c.enum_members.len)
                 c.enum_members.push(EnumMember{ mem, d.name, d.module, d.is_exported, mem })
                 ck_note_name(c, mem, d.module, d.is_exported, d.line, d.col)
             }
         } else if d.kind == DcStruct {
             if ck_own_struct(c, d.name, d.module) >= 0 { ck_error(c, d.line, d.col, "struct '" + d.name + "' is already defined") }
             FieldInfo[dynamic] ff = []
+            idx_add(&c.struct_idx, d.name, c.structs.len)
             c.structs.push(StructInfo{ d.name, ff, d.module, d.is_exported, d.name })
             ck_note_name(c, d.name, d.module, d.is_exported, d.line, d.col)
         } else if d.kind == DcFunc {
             if ck_own_func(c, d.name, d.module) >= 0 { ck_error(c, d.line, d.col, "function '" + d.name + "' is already defined") }
             Type*[dynamic] ps = []
+            idx_add(&c.func_idx, d.name, c.funcs.len)
             c.funcs.push(FuncInfo{ d.name, ps, ty(TcVoid, "void"), d.module, d.is_exported, d.name })
             ck_note_name(c, d.name, d.module, d.is_exported, d.line, d.col)
         }
@@ -1130,6 +1256,8 @@ export bool ck_check(Checker* c, Program prog) {
         c.enum_members[i].enum_name = c.enums[ck_own_enum(c, m.enum_name, m.module)].cname
     }
     for i in 0..c.structs.len { c.structs[i].cname = ck_cname(c, c.structs[i].name, c.structs[i].module, c.structs[i].exported) }
+    c.cname_idx = new_idx(c.structs.len)
+    for i in 0..c.structs.len { idx_add(&c.cname_idx, c.structs[i].cname, i) }
     for i in 0..c.funcs.len { c.funcs[i].cname = ck_cname(c, c.funcs[i].name, c.funcs[i].module, c.funcs[i].exported) }
     ck_name_conflicts(c)
 
@@ -1189,5 +1317,7 @@ export Checker* new_checker(string file) {
     EnumMember[dynamic] ems = []
     Module[dynamic]     mods = []
     NameEntry[dynamic]  names = []
-    return alloc(Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void"), mods, 0, names })
+    TypeNode*[dynamic]  nodes = []
+    return alloc(Checker{ file, false, false, ss, fs, es, ems, null, ty(TcVoid, "void"), mods, 0, names,
+                          new_idx(0), new_idx(0), new_idx(0), new_idx(0), new_idx(0), new_idx(0), nodes, new_idx(0) })
 }

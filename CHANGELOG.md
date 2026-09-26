@@ -7,6 +7,34 @@ and a GitHub Release.
 ## [Unreleased]
 - nothing yet.
 
+## [1.4.0] - 2026-09-26
+### Performance
+The compiler is **25–540× faster** and uses **up to 40% less memory** than 1.3.0
+(check/emit, measured on an 81k-line 200-module project, a 20k-line single file, and the
+compiler itself):
+
+| | 1.3.0 | 1.4.0 |
+|---|---|---|
+| 20k-line file, check | 16.25 s | **0.03 s** |
+| 81k-line project, check | 3.9 s, 151 MB | **0.15 s, 109 MB** |
+| 81k-line project, emit | 2.5 s, 241 MB | **0.27 s, 152 MB** |
+| the compiler itself, check | 0.27 s | **0.01 s** |
+
+- **String lengths are remembered.** Strata strings are C strings, so `.len`, `substr`
+  and `+` scanned the whole string every time; the lexer did that per token, which made
+  it quadratic in file size. The runtime now remembers the length of every long string
+  it creates (a pointer -> length table; strings are immutable and only freed on reset).
+  This speeds up every Strata program, not just the compiler.
+- **Hashed name lookups** in the checker: every lookup and the module name rules used to
+  scan all declarations (hundreds of millions of comparisons at 10k functions).
+- **One-pass output join** in codegen (the pairwise join copied the output ~20 times).
+- **Less memory:** each module's tokens are freed once it's parsed; fixed tokens (`+`,
+  `var`, ...) share one string instead of a copy each; expressions of the same named type
+  share one result-type node.
+### Added
+- A performance guard in the tests: a generated 20k-line file must check in under 3 s
+  (1.3.0 takes 17 s on it). 51 checks.
+
 ## [1.3.0] - 2026-09-26
 ### Added
 - **The compiler as a library, for engines.** `libstrata.dll` exports a public C API

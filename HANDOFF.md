@@ -6,7 +6,7 @@
 > [`compiler/ARCHITECTURE.md`](compiler/ARCHITECTURE.md) (compiler internals) and
 > [`website/design/DESIGN.md`](website/design/DESIGN.md) (language design) for detail.
 
-Current version: **stratac 1.3.0** · tests: **50/50** · repo: **https://github.com/UseStrata/Strata**
+Current version: **stratac 1.4.0** · tests: **51/51** · repo: **https://github.com/UseStrata/Strata**
 
 ---
 
@@ -37,7 +37,7 @@ version is retired to `archive/dminusminus-seed/`.
 Strata/
 ├─ README.md              project front page
 ├─ HANDOFF.md             this file
-├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.3.0)
+├─ CHANGELOG.md           per-version history (v0.6.0 .. v1.4.0)
 ├─ Strata.md              the original founding plan
 ├─ LICENSE                GPL-3.0 (the compiler)
 ├─ LICENSE-RUNTIME.md     runtime linking exception (so games aren't GPL)
@@ -233,7 +233,7 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
 
 ## 6. Tests
 
-`run.ps1` runs **50 checks**:
+`run.ps1` runs **51 checks**:
 1. **bootstrap**: runs `build.ps1` (pinned release → stage1 → stage2 + the fixpoint check).
 2. **goldens**: `compiler/tests/<stage>/<name>.expected`, compared **byte-for-byte**
    against `bin/stratac.exe <stage> examples/<name>.strata`, using the self-hosted
@@ -247,6 +247,8 @@ unique. Modules may contain only declarations. Tests: `examples/modules2.strata`
    (every API function, plus a flat-memory check over 300 compile + reset cycles), C++
    (`strata.hpp`) and C# (`Strata.cs`; skipped without a .NET SDK), and a C program
    calling a Strata-built dll through its generated header.
+5. **performance guard**: a generated 20k-line file must type-check in under 3 s (it takes
+   ~0.03 s; 1.3.0 took 17 s), so a quadratic regression fails the suite.
 
 ---
 
@@ -306,23 +308,21 @@ performance if the compiler starts building very large strings.
 ## 10. Roadmap
 
 **Agreed order (2026-09-26):** build system (1.2.0, done) → public endpoints (1.3.0, done:
-`libstrata` C API, C++/C# wrappers, generated dll headers) → **compiler speed + memory**
-(next). Later: integrations for commercial engines (Unity, Unreal: e.g. MSVC `.lib`
+`libstrata` C API, C++/C# wrappers, generated dll headers) → compiler speed + memory (1.4.0,
+done). Later: integrations for commercial engines (Unity, Unreal: e.g. MSVC `.lib`
 import libraries, engine plugins). Any engine may embed Strata (`LICENSE-EMBEDDING.md`).
 
-Known performance problems, for the optimization pass (measured on 12k–81k-line projects):
-- `s.len` is `strlen` (O(n)), so `for i in 0..s.len` re-scans the string on **every
-  iteration**. The range bound is re-evaluated each time; codegen should evaluate it once,
-  which is also the right semantics. This makes the lexer quadratic in *file* size: a
-  4k-line single file parses in 0.6 s, against 0.08 s for the same code split across files.
-- Strings are NUL-terminated and immutable, so building text by `a = a + b` copies.
-  A string builder (or length-carrying strings) is the real fix. Codegen already avoids it.
-- The arena abandons the rest of a block when an allocation doesn't fit.
-- Name lookups in the checker are linear scans. Fine at 2,000 functions, but a hash map
-  would be needed for very large programs.
+**Performance (1.4.0):** fixed: quadratic string length (runtime remembers lengths of long
+strings, `lib/sstr.h`), linear name lookups (hash indexes in the checker), repeated output
+copies (one-pass join), token memory. Numbers are in the CHANGELOG. What's left:
+- Memory is now mostly the syntax tree: `Expr`/`Stmt` are wide structs (~130/250 bytes).
+  Slimming them is an AST-layout change across all phases.
+- `for i in 0..n` re-evaluates `n` every iteration. It's cheap now, but "evaluate once" is
+  probably the right *semantics* (Go/Rust); decide before code starts relying on either.
 - No `break` / `continue` in the language yet.
+- The arena abandons the rest of a block when an allocation doesn't fit.
 - Build step 2 (per-module C files + incremental gcc) and step 3 (`stratac watch`) are
-  designed (see the 2026-09 build-system discussion) but not built.
+  designed but not built; gcc, not stratac, is now the slow part of a build.
 
 
 - **Tagged unions + pattern matching** — model AST nodes / game events cleanly (pairs with `switch`).
