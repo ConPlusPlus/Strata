@@ -11,6 +11,8 @@
 #ifndef STRATA_SIO_H
 #define STRATA_SIO_H
 
+#include <sstate.h>
+
 #include <stdio.h>
 #include <stdbool.h>
 #include <sstr.h>
@@ -18,8 +20,8 @@
 
 /* args(): the command-line arguments as a string[dynamic] (args()[0] = the program).
  * The generated main() records argc/argv here before any user code runs. */
-static int    strata_argc_v;
-static char** strata_argv_v;
+STRATA_STATE(int    strata_argc_v, );
+STRATA_STATE(char** strata_argv_v, );
 static inline void strata_set_args(int argc, char** argv) { strata_argc_v = argc; strata_argv_v = argv; }
 static inline Array strata_args(void) {
     Array a = arr_make(sizeof(const char*));

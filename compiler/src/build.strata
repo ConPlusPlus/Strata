@@ -35,6 +35,7 @@ export struct BuildSpec {
     bool   force            // ignore the cache
     bool   quiet            // don't print "built ..." / "up to date ..."
     string tool_version     // part of the fingerprint: a new compiler rebuilds everything
+    bool   split            // one C file per module, compiled in parallel (projects)
 }
 
 string[dynamic] no_strings() {
@@ -47,7 +48,7 @@ export BuildSpec spec_for_file(string path, string version, bool quiet) {
     string stem = stem_of(path)
     return BuildSpec{ path, stem + ".c", stem + ".exe", false, true,
                       no_strings(), no_strings(), no_strings(), no_strings(), no_strings(), no_strings(),
-                      "", false, quiet, version }
+                      "", false, quiet, version, false }
 }
 
 // A project build: paths in the project file are relative to its folder.
@@ -59,7 +60,7 @@ export BuildSpec spec_for_project(Project p, string version, bool release, bool 
     BuildSpec s = BuildSpec{ root + "/" + p.entry, out + "/" + p.name + ".c", out + "/" + p.name + ext,
                              p.output == "dll", release || p.release,
                              p.defines, no_strings(), no_strings(), p.libs, no_strings(), p.frameworks,
-                             out + "/.strata-cache", force, quiet, version }
+                             out + "/.strata-cache", force, quiet, version, p.split }
     for i in 0..p.include_dirs.len { s.include_dirs.push(root + "/" + p.include_dirs[i]) }
     for i in 0..p.lib_dirs.len     { s.lib_dirs.push(root + "/" + p.lib_dirs[i]) }
     for i in 0..p.c_sources.len    { s.c_sources.push(root + "/" + p.c_sources[i]) }
@@ -124,6 +125,7 @@ export bool run_build(BuildSpec s, string libdir) {
               ": error: a dll has no main, so its entry file can't contain top-level code")
         return false
     }
+    if s.split { return run_split_build(s, libdir, prog) }
     Codegen cg = new_codegen()
     cg.no_main = s.dll
     string c = generate(&cg, prog)
@@ -174,6 +176,139 @@ export bool run_build(BuildSpec s, string libdir) {
     return true
 }
 
+// ---- split builds ------------------------------------------------------------------
+// One C file per module (see generate_split), each cached on its own: a module's file is
+// recompiled only if its text, the shared header, or the compile flags changed. Changed
+// files compile in parallel, one per core; then everything links.
+
+// Write `text` to `path` unless it already holds exactly that (keeps timestamps quiet).
+void write_if_changed(string path, string text) {
+    if read_file(path) != text { write_file(path, text) }
+}
+
+// For gcc response files: gcc reads `\` there as an escape, so paths use `/`.
+string fwd_path(string p) {
+    string r = ""
+    int n = p.len
+    for i in 0..n {
+        if p[i] == '\\' { r = r + "/" } else { r = r + substr(p, i, 1) }
+    }
+    return r
+}
+string rsp_arg(string p) { return quoted(fwd_path(p)) }
+
+bool run_split_build(BuildSpec s, string libdir, Program prog) {
+    string out_dir = dirname_of(s.out_bin)
+    string name = basename_of(stem_of(s.out_bin))
+    string mode = "debug"
+    string opt = " -O0 -g"
+    if s.release { mode = "release"; opt = " -O2" }
+    string obj = out_dir + "/obj/" + mode
+    system(cstr("if not exist " + quoted(win_path(obj)) + " mkdir " + quoted(win_path(obj))))
+
+    Codegen cg = new_codegen()
+    cg.no_main = s.dll
+    SplitOutput so = generate_split(&cg, prog, name + ".strata.h", guard_for(name + "_strata"))
+    if cg.had_error { strata_report("codegen: program uses features not supported yet"); return false }
+    write_if_changed(obj + "/" + name + ".strata.h", so.header)
+
+    // compile flags shared by every file (in response files, so gcc starts directly)
+    string flags = "-std=gnu11" + opt + " -pipe -I" + rsp_arg(obj) + " -I" + rsp_arg(libdir)
+    for i in 0..s.include_dirs.len { flags = flags + " -I" + rsp_arg(s.include_dirs[i]) }
+    for i in 0..s.defines.len      { flags = flags + " -D" + quoted(s.defines[i]) }
+    string salt = flags + "\n" + s.tool_version + "\n"
+
+    // Chunks: consecutive modules share one C file, about two chunks per core. Starting
+    // gcc costs ~150 ms on Windows whatever the file's size, so one file per module wastes
+    // most of a build on process start-up; a chunk keeps edits cheap (one chunk recompiles).
+    int jobs = strata_cpu_count()
+    int per_chunk = (so.units.len + 2 * jobs - 1) / (2 * jobs)
+    if per_chunk < 1 { per_chunk = 1 }
+
+    string[dynamic] objects = []
+    string[dynamic] keys = []
+    string[dynamic] key_files = []
+    string[dynamic] rsps = []
+    int total = 0
+    int u = 0
+    while u < so.units.len {
+        string[dynamic] parts = []
+        int end = u + per_chunk
+        if end > so.units.len { end = so.units.len }
+        for k in u..end { parts.push(so.units[k]) }
+        string text = strata_join(&parts)
+        string cfile = obj + "/" + so.names[u]
+        if end - u > 1 { cfile = obj + "/chunk" + int_to_str(u) + "_" + so.names[u] }
+        string ofile = stem_of(cfile) + ".o"
+        string key = fingerprint(salt + so.header + "\n" + text)
+        objects.push(ofile)
+        total += 1
+        if s.force || read_file(ofile + ".key") != key || !strata_file_exists(ofile) {
+            write_if_changed(cfile, text)
+            string rsp = stem_of(cfile) + ".rsp"
+            write_if_changed(rsp, flags + " -c " + rsp_arg(cfile) + " -o " + rsp_arg(ofile) + "\n")
+            rsps.push(rsp)
+            keys.push(key)
+            key_files.push(ofile + ".key")
+        }
+        u = end
+    }
+    // extra C sources from the project file
+    for i in 0..s.c_sources.len {
+        string ofile = obj + "/c" + int_to_str(i) + "_" + basename_of(stem_of(s.c_sources[i])) + ".o"
+        string key = fingerprint(salt + read_file(s.c_sources[i]))
+        objects.push(ofile)
+        total += 1
+        if s.force || read_file(ofile + ".key") != key || !strata_file_exists(ofile) {
+            string rsp = stem_of(ofile) + ".rsp"
+            write_if_changed(rsp, flags + " -c " + rsp_arg(s.c_sources[i]) + " -o " + rsp_arg(ofile) + "\n")
+            rsps.push(rsp)
+            keys.push(key)
+            key_files.push(ofile + ".key")
+        }
+    }
+
+    // a dll gets a C header declaring its entry points
+    if s.dll { write_if_changed(stem_of(s.out_bin) + ".h", generate_header(prog, guard_for(name), basename_of(s.entry))) }
+
+    if rsps.len > 0 {
+        if strata_run_gcc_parallel(&rsps, jobs) > 0 { return false }
+        for i in 0..keys.len { write_file(key_files[i], keys[i]) }
+    }
+
+    // link (skipped if nothing was recompiled and the link inputs are the same); the
+    // arguments go in a response file too - hundreds of object paths overflow cmd.exe's
+    // 8191-character command line
+    string[dynamic] args = []
+    args.push("-o " + rsp_arg(s.out_bin) + opt + "\n")
+    for i in 0..objects.len { args.push(rsp_arg(objects[i]) + "\n") }
+    for i in 0..s.lib_dirs.len { args.push("-L" + rsp_arg(s.lib_dirs[i]) + "\n") }
+    for i in 0..prog.decls.len {   // `link "..."` directives in the source
+        if prog.decls[i].kind == DcLink { args.push("-l" + prog.decls[i].path + "\n") }
+    }
+    for i in 0..s.libs.len       { args.push("-l" + s.libs[i] + "\n") }
+    for i in 0..s.frameworks.len { args.push("-framework " + s.frameworks[i] + "\n") }
+    if s.dll { args.push("-shared -Wl,--out-implib," + rsp_arg(stem_of(s.out_bin) + ".dll.a") + "\n") }
+    args.push("-lm\n")
+    string link_text = strata_join(&args)
+    string link_rsp = obj + "/link.rsp"
+    write_if_changed(link_rsp, link_text)
+    string link_key = fingerprint(link_text + s.tool_version)
+    if rsps.len == 0 && !s.force && read_file(s.cache_file) == link_key && strata_file_exists(s.out_bin) {
+        if !s.quiet { strata_report("up to date: " + s.out_bin) }
+        return true
+    }
+    string[dynamic] link_job = []
+    link_job.push(link_rsp)
+    if strata_run_gcc_parallel(&link_job, 1) > 0 { return false }
+    write_file(s.cache_file, link_key)
+    if !s.quiet {
+        strata_report("built " + s.out_bin + " (" + int_to_str(rsps.len) + " of " + int_to_str(total) +
+                      " C files compiled, " + int_to_str(so.units.len) + " modules)")
+    }
+    return true
+}
+
 // ---- targets --------------------------------------------------------------
 // What a command works on: a single .strata file, or a project (a strata.toml, a folder
 // containing one, or - given "" - the current folder).
@@ -187,7 +322,7 @@ bool ends_with(string s, string suffix) {
 // An empty Project for targets that aren't one.
 Project no_project() {
     string[dynamic] e = []
-    return Project{ false, "", "", "", "", "", "", "", false, e, e, e, e, e, e }
+    return Project{ false, "", "", "", "", "", "", "", false, e, e, e, e, e, e, false }
 }
 
 export Target resolve_target(string arg) {

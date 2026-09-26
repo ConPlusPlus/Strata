@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright © 2026 Connor Rutberg
+//
+// src/hashidx.strata - a small hash index from names to entry numbers (Strata has no
+// built-in map yet). Used by the checker's name tables and the lexer's identifier
+// interning.
+
+// A hash index from names to entries of one table: chains of entry numbers, newest first.
+// The buckets never grow, so size it for the expected number of entries (more entries
+// still work; the chains just get longer).
+export struct NameIdx { int[dynamic] head; int[dynamic] next; int mask }
+
+export NameIdx new_idx(int n) {
+    int cap = 16
+    while cap < n * 2 { cap = cap * 2 }
+    int[dynamic] head = []
+    for i in 0..cap { head.push(0) }
+    int[dynamic] next = []
+    return NameIdx{ head, next, cap - 1 }
+}
+
+export int name_hash(string s, int mask) {
+    u64 h = 5381
+    int n = s.len
+    for i in 0..n { h = h * 33 + cast<u64>(cast<u8>(s[i])) }
+    return cast<int>(h & cast<u64>(mask))
+}
+
+// Entries must be added in order 0, 1, 2, ... (entry k = the table's k-th element).
+export void idx_add(NameIdx* x, string key, int k) {
+    int b = name_hash(key, x.mask)
+    x.next.push(x.head[b])
+    x.head[b] = k + 1
+}
+export int idx_first(NameIdx* x, string key) { return x.head[name_hash(key, x.mask)] - 1 }
+
+// name_hash of s[start .. start+n), without making that substring
+export int slice_hash(string s, int start, int n, int mask) {
+    u64 h = 5381
+    for i in start..start + n { h = h * 33 + cast<u64>(cast<u8>(s[i])) }
+    return cast<int>(h & cast<u64>(mask))
+}
+export int idx_next(NameIdx* x, int k) { return x.next[k] - 1 }

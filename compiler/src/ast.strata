@@ -23,8 +23,8 @@ export struct TypeNode {
     string       name// TyNamed: "int", "vec3", "Entity", ...
     TypeNode* elem// element type (Array / FixedArray / Pointer)
     string       size// TyFixedArray: N as written
-    int       line
-    int       col
+    i32       line
+    i32       col
 }
 
 export TypeNode* new_type(TypeKind k, int line, int col) {
@@ -40,14 +40,16 @@ export enum ExprKind {
     ExCast, ExSizeof
 }
 
+// Field order matters for size: the small fields (kind, bval, line, col) share the first
+// 16 bytes instead of each padding out to 8.
 export struct Expr {
     ExprKind  kind
-    int       line
-    int       col
+    bool      bval// ExBoolLit value
+    i32       line
+    i32       col
     string       text// Int/Float raw text; String/Char decoded; Name id; Unary/Binary op
     string       field// ExField: member name
     string       type_name// ExStructLit: struct name
-    bool      bval// ExBoolLit value
     Expr*     a// Unary operand / Binary lhs / Call callee / Field obj / Index obj
     Expr*     b// Binary rhs / Index index
     Expr*[dynamic]   items// Call args / ArrayLit elems / StructLit args
@@ -57,7 +59,7 @@ export struct Expr {
 
 export Expr* new_expr(ExprKind k, int line, int col) {
     Expr*[dynamic] items = []
-    return alloc(Expr{ k, line, col, "", "", "", false, null, null, items, null, null })
+    return alloc(Expr{ k, false, line, col, "", "", "", null, null, items, null, null })
 }
 
 // ---- statements --------------------------------------------------------
@@ -77,10 +79,10 @@ export struct SwitchCase {
 
 export struct Stmt {
     StmtKind kind
-    int      line
-    int      col
+    bool     is_const// StVar
+    i32      line
+    i32      col
     // StVar
-    bool       is_const
     string        name// StVar name / StForIn loop var / StRegion region name ("" = anon)
     TypeNode*  type// StVar: null => inferred (`var`)
     Expr*      init// StVar initializer (optional)
@@ -110,8 +112,8 @@ export Stmt* new_stmt(StmtKind k, int line, int col) {
     Stmt*[dynamic]      stmts = []
     SwitchCase[dynamic] cases = []
     return alloc(Stmt{
-        k, line, col,
-        false, "", null, null,   // is_const, name, type, init
+        k, false, line, col,      // kind, is_const, line, col
+        "", null, null,           // name, type, init
         null,                     // expr
         null, "", null,           // target, op, value
         null,                     // cond

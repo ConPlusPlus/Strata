@@ -12,14 +12,16 @@
 #ifndef STRATA_SSTR_H
 #define STRATA_SSTR_H
 
+#include <sstate.h>
+
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <arena.h>
 
-static Arena strata_str_arena_v;
-static int   strata_str_arena_ready = 0;
+STRATA_STATE(Arena strata_str_arena_v, );
+STRATA_STATE(int   strata_str_arena_ready, = 0);
 static inline Arena* strata_str_arena(void) {
     if (!strata_str_arena_ready) { strata_str_arena_v = arena_make(); strata_str_arena_ready = 1; }
     return &strata_str_arena_v;
@@ -37,9 +39,9 @@ static inline Arena* strata_str_arena(void) {
 #define STRATA_LEN_MIN 128            /* shorter strings are cheap to measure */
 
 typedef struct { const char* p; size_t len; } StrataLen;
-static StrataLen* strata_len_tab = NULL;
-static size_t     strata_len_cap = 0;     /* power of two */
-static size_t     strata_len_count = 0;
+STRATA_STATE(StrataLen* strata_len_tab, = NULL);
+STRATA_STATE(size_t     strata_len_cap, = 0);     /* power of two */
+STRATA_STATE(size_t     strata_len_count, = 0);
 
 static inline size_t strata_len_slot(const char* p, size_t cap) {
     unsigned long long x = (unsigned long long)(uintptr_t)p;

@@ -18,6 +18,8 @@
 
 // TokKind + Token
 import token
+import hashidx                  // NameIdx, for interning
+import "strata_host.h"         // strata_array_free
 
 struct Lexer {
     string  src
@@ -29,6 +31,9 @@ struct Lexer {
     int  start_col
     bool had_error
     bool saw_newline// did the trivia we just skipped cross a line?
+    // identifier/number texts seen so far, one copy each (see intern)
+    string[dynamic] names
+    NameIdx names_idx
 }
 
 // ---- character classes -------------------------------------------------
@@ -70,11 +75,32 @@ bool match(Lexer* l, char expected) {
 
 // ---- token construction ------------------------------------------------
 
+// Is s[start .. start+n) the same text as w?
+bool same_slice(string s, int start, int n, string w) {
+    if w.len != n { return false }
+    for i in 0..n { if s[start + i] != w[i] { return false } }
+    return true
+}
+
+// Identifiers and numbers repeat a lot (i, x, self, 0, 1, ...): each file keeps one copy
+// of each distinct text, and every token with that text shares it.
+string intern(Lexer* l, int start, int n) {
+    int k = l.names_idx.head[slice_hash(l.src, start, n, l.names_idx.mask)] - 1
+    while k >= 0 {
+        if same_slice(l.src, start, n, l.names[k]) { return l.names[k] }
+        k = idx_next(&l.names_idx, k)
+    }
+    string w = substr(l.src, start, n)
+    idx_add(&l.names_idx, w, l.names.len)
+    l.names.push(w)
+    return w
+}
+
 Token make(Lexer* l, TokKind kind) {
-    // Only identifiers and numbers need a copy of their source text. Every other token's
+    // Only identifiers and numbers need their source text (interned). Every other token's
     // text is fixed ("+", "var", ...), so they share kind_name's constant string.
     if kind == TkIdent || kind == TkInt || kind == TkFloat {
-        return Token{ kind, substr(l.src, l.start, l.pos - l.start), l.start_line, l.start_col }
+        return Token{ kind, intern(l, l.start, l.pos - l.start), l.start_line, l.start_col }
     }
     return Token{ kind, kind_name(kind), l.start_line, l.start_col }
 }
@@ -282,7 +308,8 @@ bool ends_statement(TokKind k) {
 
 export Token[dynamic] lex(string src) {
     Token[dynamic] tokens = []
-    Lexer lx = Lexer{ src, 0, 1, 1, 0, 1, 1, false, false }
+    string[dynamic] names = []
+    Lexer lx = Lexer{ src, 0, 1, 1, 0, 1, 1, false, false, names, new_idx(src.len / 32) }
     TokKind last = TkError
     bool have_last = false
     int  nest = 0// open ( and [ : newlines inside them never end a statement
@@ -313,6 +340,10 @@ export Token[dynamic] lex(string src) {
         tokens.push(Token{ TkNewline, "", lx.line, lx.col })
     }
     tokens.push(Token{ TkEof, "", lx.line, lx.col })
+    // the intern table itself is done (the strings it handed out live on in the tokens)
+    strata_array_free(&lx.names)
+    strata_array_free(&lx.names_idx.head)
+    strata_array_free(&lx.names_idx.next)
     return tokens
 }
 

@@ -16,6 +16,8 @@
 #ifndef STRATA_SARR_H
 #define STRATA_SARR_H
 
+#include <sstate.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,7 +32,7 @@ typedef struct {
 
 /* Each buffer is preceded by a list link (two pointers = 16 bytes, so data stays aligned). */
 typedef struct StrataArrLink { struct StrataArrLink* prev; struct StrataArrLink* next; } StrataArrLink;
-static StrataArrLink strata_arr_list = { &strata_arr_list, &strata_arr_list };   /* circular, sentinel */
+STRATA_STATE(StrataArrLink strata_arr_list, = { &strata_arr_list, &strata_arr_list });   /* circular, sentinel */
 
 static inline void* strata_arr_realloc(void* data, size_t bytes) {
     StrataArrLink* h = data ? ((StrataArrLink*)data) - 1 : NULL;

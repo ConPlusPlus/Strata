@@ -37,6 +37,6 @@ export enum TokKind {
 export struct Token {
     TokKind kind
     string     text// source lexeme (Ident/Int/Float) or decoded value (String/Char)
-    int     line
-    int     col
+    i32     line
+    i32     col
 }

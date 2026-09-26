@@ -14,6 +14,8 @@
 #ifndef STRATA_ARENA_H
 #define STRATA_ARENA_H
 
+#include <sstate.h>
+
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,8 +73,8 @@ static inline void arena_free(Arena* a) {
 }
 
 /* A process-global heap backing `alloc(value)` (boxed values; reclaimed at exit). */
-static Arena strata_heap_v;
-static int   strata_heap_ready = 0;
+STRATA_STATE(Arena strata_heap_v, );
+STRATA_STATE(int   strata_heap_ready, = 0);
 static inline Arena* strata_heap(void) {
     if (!strata_heap_ready) { strata_heap_v = arena_make(); strata_heap_ready = 1; }
     return &strata_heap_v;

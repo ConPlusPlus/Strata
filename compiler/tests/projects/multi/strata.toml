@@ -1,0 +1,4 @@
+# split build: several modules, runtime state and a single-header C library shared across C files
+[project]
+name  = "multi"
+entry = "src/main.strata"

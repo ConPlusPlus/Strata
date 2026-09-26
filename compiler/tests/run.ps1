@@ -74,6 +74,22 @@ Get-ChildItem -Path (Join-Path $here "projects") -Directory | ForEach-Object {
     else     { Write-Host "FAIL  project/$name" -ForegroundColor Red;   $script:fail++ }
 }
 
+# --- incremental split build: editing one function body recompiles one C file ---------
+$incDir = Join-Path $here "embed\build\incremental"
+if (Test-Path $incDir) { Remove-Item $incDir -Recurse -Force }
+Copy-Item (Join-Path $here "projects\multi") $incDir -Recurse
+if (Test-Path (Join-Path $incDir "build")) { Remove-Item (Join-Path $incDir "build") -Recurse -Force }
+& $strata build $incDir | Out-Null
+$textMod = Join-Path $incDir "src\parts\text.strata"
+(Get-Content $textMod -Raw).Replace("0..300", "0..301") | Set-Content $textMod -NoNewline
+$rebuild = (& $strata build $incDir) -join "`n"
+$second  = ((& $strata run $incDir) -join "`n") -replace "`r",""
+if ($rebuild -match "\(1 of \d+ C files compiled" -and $second.StartsWith("1`n3010")) {
+    Write-Host "PASS  build/incremental (one edited module -> one C file recompiled)" -ForegroundColor Green; $pass++
+} else {
+    Write-Host "FAIL  build/incremental: $rebuild" -ForegroundColor Red; $fail++
+}
+
 # --- performance: guard against the compiler going quadratic again -------------------
 # A generated 20k-line single file must type-check in under 3 s. (It takes ~0.05 s; before
 # the fixes in 1.4.0 it took 16 s, because every token re-measured the whole source.)

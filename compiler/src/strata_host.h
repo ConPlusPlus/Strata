@@ -80,6 +80,93 @@ static inline const char* strata_join(const Array* parts) {
     return r;
 }
 
+/* ---- files ------------------------------------------------------------------ */
+
+static inline bool strata_file_exists(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
+/* ---- running commands in parallel --------------------------------------------- */
+
+#ifdef _WIN32
+#include <process.h>   /* _spawnlp, _cwait */
+#endif
+
+/* How many commands to run at once: the machine's core count. */
+static inline long long strata_cpu_count(void) {
+    const char* n = getenv("NUMBER_OF_PROCESSORS");
+    long long v = n ? atoll(n) : 0;
+    return v > 0 ? v : 4;
+}
+
+/* Run shell commands (a string[dynamic]), up to `jobs` at a time; wait for all of them.
+ * Returns how many failed. Output goes to this process's console, as with system(). */
+static inline long long strata_run_parallel(const Array* cmds, long long jobs) {
+    const char** c = (const char**)cmds->data;
+    long long n = cmds->len, failed = 0;
+    if (jobs < 1) jobs = 1;
+#ifdef _WIN32
+    intptr_t* h = (intptr_t*)malloc(sizeof(intptr_t) * (size_t)(n ? n : 1));
+    long long waited = 0;
+    for (long long i = 0; i < n; i++) {
+        while (i - waited >= jobs) {                   /* window full: wait for the oldest */
+            int st = 0;
+            if (h[waited] && (_cwait(&st, h[waited], 0) == -1 || st != 0)) failed++;
+            waited++;
+        }
+        h[i] = _spawnlp(_P_NOWAIT, "cmd.exe", "cmd.exe", "/c", c[i], (const char*)NULL);
+        if (h[i] == -1) { failed++; h[i] = 0; }
+    }
+    for (; waited < n; waited++) {
+        int st = 0;
+        if (h[waited] && (_cwait(&st, h[waited], 0) == -1 || st != 0)) failed++;
+    }
+    free(h);
+#else
+    for (long long i = 0; i < n; i++) if (system(c[i]) != 0) failed++;
+#endif
+    return failed;
+}
+
+/* Run `gcc @file` for each response file, up to `jobs` at a time, starting gcc directly
+ * (no cmd.exe in between: on Windows each extra process costs real time). Returns how
+ * many failed. */
+static inline long long strata_run_gcc_parallel(const Array* rsp_files, long long jobs) {
+    const char** f = (const char**)rsp_files->data;
+    long long n = rsp_files->len, failed = 0;
+    if (jobs < 1) jobs = 1;
+#ifdef _WIN32
+    intptr_t* h = (intptr_t*)malloc(sizeof(intptr_t) * (size_t)(n ? n : 1));
+    long long waited = 0;
+    for (long long i = 0; i < n; i++) {
+        while (i - waited >= jobs) {
+            int st = 0;
+            if (h[waited] && (_cwait(&st, h[waited], 0) == -1 || st != 0)) failed++;
+            waited++;
+        }
+        char arg[1100];
+        snprintf(arg, sizeof arg, "@\"%s\"", f[i]);
+        h[i] = _spawnlp(_P_NOWAIT, "gcc", "gcc", arg, (const char*)NULL);
+        if (h[i] == -1) { failed++; h[i] = 0; }
+    }
+    for (; waited < n; waited++) {
+        int st = 0;
+        if (h[waited] && (_cwait(&st, h[waited], 0) == -1 || st != 0)) failed++;
+    }
+    free(h);
+#else
+    for (long long i = 0; i < n; i++) {
+        char cmd[1200];
+        snprintf(cmd, sizeof cmd, "gcc @\"%s\"", f[i]);
+        if (system(cmd) != 0) failed++;
+    }
+#endif
+    return failed;
+}
+
 /* ---- memory --------------------------------------------------------------- */
 
 /* Free one dynamic array's buffer now (e.g. a module's tokens once it's parsed) and leave

@@ -8,4 +8,5 @@ out_dir = "../bin"
 
 [build]
 release      = true
+split        = false          # strata_host.h keeps process state in `static`s: one C file
 include_dirs = ["../src"]    # strata_host.h lives beside the compiler's sources

@@ -15,6 +15,7 @@
 //
 //     [build]                       # every platform
 //     release      = false          # true: -O2, false: -O0 -g (`--release` overrides)
+//     split        = true           # one C file per module: only changed modules recompile
 //     defines      = ["GAME_DEBUG=1"]
 //     include_dirs = ["third_party/include"]
 //     lib_dirs     = ["third_party/lib"]
@@ -49,6 +50,7 @@ export struct Project {
     string[dynamic] libs
     string[dynamic] c_sources
     string[dynamic] frameworks
+    bool   split             // compile one C file per module (default true)
 }
 
 // The platform stratac is running on. stratac only runs on Windows so far; this is the one
@@ -144,6 +146,11 @@ void toml_build_key(Toml* t, string key, string v, bool platform, bool apply) {
         if apply { t.p.release = r }
         return
     }
+    if key == "split" && !platform {
+        bool sp = toml_bool(t, v)
+        if apply { t.p.split = sp }
+        return
+    }
     bool list_key = key == "defines" || key == "include_dirs" || key == "lib_dirs" || key == "libs" || key == "c_sources"
     if key == "frameworks" && t.section == "macos" { list_key = true }
     if !list_key {
@@ -191,7 +198,7 @@ export Project load_project(string path) {
     string[dynamic] l = []
     string[dynamic] cs = []
     string[dynamic] fw = []
-    Project p = Project{ true, path, dirname_of(path), "", "", "src/main.strata", "exe", "build", false, d, i, ld, l, cs, fw }
+    Project p = Project{ true, path, dirname_of(path), "", "", "src/main.strata", "exe", "build", false, d, i, ld, l, cs, fw, true }
     Toml t = Toml{ p, "", 0, basename_of(path) }
 
     string src = read_file(path)
